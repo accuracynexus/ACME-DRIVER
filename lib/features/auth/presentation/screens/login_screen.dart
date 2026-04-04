@@ -126,9 +126,9 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                   alignment: Alignment.centerRight,
                   child: TextButton(
                     onPressed: () => context.push(AppRoutes.forgotPassword),
-                    child: Text(
+                    child: const Text(
                       AppStrings.forgotPassword,
-                      style: const TextStyle(color: AppColors.primary),
+                      style: TextStyle(color: AppColors.primary),
                     ),
                   ),
                 ),
@@ -141,7 +141,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                 const SizedBox(height: 24),
                 Center(
                   child: TextButton(
-                    onPressed: () => context.push(AppRoutes.signUp),
+                    onPressed: () => context.push(AppRoutes.signUpSteps),
                     child: RichText(
                       text: TextSpan(
                         text: '¿No tienes cuenta? ',

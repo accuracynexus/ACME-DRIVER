@@ -5,6 +5,7 @@ import '../../features/auth/presentation/providers/auth_provider.dart';
 import '../../features/auth/presentation/screens/splash_screen.dart';
 import '../../features/auth/presentation/screens/login_screen.dart';
 import '../../features/auth/presentation/screens/signup_screen.dart';
+import '../../features/auth/presentation/screens/signup_screen_steps.dart';
 import '../../features/auth/presentation/screens/forgot_password_screen.dart';
 import '../../features/home/presentation/screens/main_shell.dart';
 import '../../features/home/presentation/screens/home_screen.dart';
@@ -19,6 +20,7 @@ class AppRoutes {
   static const splash = '/';
   static const login = '/login';
   static const signUp = '/signup';
+  static const signUpSteps = '/signup-steps';
   static const forgotPassword = '/forgot-password';
   static const home = '/home';
   static const availableOrders = '/orders';
@@ -39,6 +41,7 @@ final routerProvider = Provider<GoRouter>((ref) {
       final isSplash = state.matchedLocation == AppRoutes.splash;
       final isLoginRoute = state.matchedLocation == AppRoutes.login ||
           state.matchedLocation == AppRoutes.signUp ||
+          state.matchedLocation == AppRoutes.signUpSteps ||
           state.matchedLocation == AppRoutes.forgotPassword;
 
       if (isLoading) return null; // stay on splash
@@ -62,6 +65,10 @@ final routerProvider = Provider<GoRouter>((ref) {
       GoRoute(
         path: AppRoutes.signUp,
         builder: (_, __) => const SignUpScreen(),
+      ),
+      GoRoute(
+        path: AppRoutes.signUpSteps,
+        builder: (_, __) => const SignUpScreenSteps(),
       ),
       GoRoute(
         path: AppRoutes.forgotPassword,

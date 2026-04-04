@@ -60,20 +60,29 @@ class AuthRemoteDataSourceImpl implements AuthRemoteDataSource {
         throw const AppAuthException('No se pudo crear el usuario');
       }
 
-      // Create profile record
+      // Create profile record with all fields
       await _client.from(AppConstants.profilesTable).insert({
         'id': user.id,
         'full_name': metadata['fullName'],
         'role': 'driver',
+        'phone': metadata['phone'] ?? '',
+        'address': metadata['address'] ?? '',
+        'identification_number': metadata['identificationNumber'] ?? '',
+        'identification_type': metadata['identificationType'] ?? 'cedula',
+        'notifications_enabled': metadata['notificationsEnabled'] ?? false,
+        'location_enabled': metadata['locationEnabled'] ?? false,
       });
 
-      // Create driver record
+      // Create driver record with all fields
       await _client.from(AppConstants.driversTable).insert({
         'user_id': user.id,
         'vehicle_type': metadata['vehicleType'] ?? 'moto',
-        'phone': metadata['phone'] ?? '',
+        'license_plate': metadata['licensePlate'] ?? '',
+        'license_number': metadata['licenseNumber'] ?? '',
+        'bank_account': metadata['bankAccount'] ?? '',
         'status': 'offline',
-        'is_active': false,
+        'is_active': true,
+        'is_verified': false,
       });
 
       return await _fetchDriverProfile(user.id);

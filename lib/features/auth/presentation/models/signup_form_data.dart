@@ -1,3 +1,5 @@
+import '../../../../core/extensions/extensions.dart';
+
 class SignUpFormData {
   // Step 1: Personal Info
   String fullName = '';
@@ -16,9 +18,42 @@ class SignUpFormData {
   String address = '';
   String bankAccount = '';
 
-  // Step 4: Permissions
+  // Step 4: Permissions & Terms
   bool locationEnabled = false;
   bool notificationsEnabled = false;
+  bool acceptedTerms = false;
+
+  // Validation methods
+  bool isStep1Valid() {
+    if (fullName.isEmpty) return false;
+    if (!email.isValidEmail) return false;
+    if (!phone.isValidPhone) return false;
+    if (identificationNumber.isEmpty) return false;
+    if (!identificationNumber.isValidIdentificationNumber) return false;
+    if (!password.isStrongPassword) return false;
+    return true;
+  }
+
+  bool isStep2Valid() {
+    if (vehicleType != 'bicicleta' && licensePlate.isEmpty) return false;
+    if (vehicleType != 'bicicleta' && !licensePlate.isValidLicensePlate) return false;
+    if (licenseNumber.isEmpty) return false;
+    if (!licenseNumber.isValidLicenseNumber) return false;
+    return true;
+  }
+
+  bool isStep3Valid() {
+    if (!address.isValidAddress) return false;
+    if (bankAccount.isEmpty) return false;
+    if (!bankAccount.isValidIban) return false;
+    return true;
+  }
+
+  bool isStep4Valid() {
+    if (!acceptedTerms) return false;
+    if (!locationEnabled && !notificationsEnabled) return false;
+    return true;
+  }
 
   Map<String, dynamic> toMetadata() {
     return {

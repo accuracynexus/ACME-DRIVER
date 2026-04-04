@@ -86,8 +86,33 @@ class _SignUpScreenStepsState extends ConsumerState<SignUpScreenSteps> {
     _formData.address = _addressController.text.trim();
     _formData.bankAccount = _bankAccountController.text.trim();
 
+    if (_currentStep == 0 && !_formData.isStep1Valid()) {
+      context.showSnackBar('Por favor completa todos los campos correctamente',
+          isError: true);
+      return;
+    } else if (_currentStep == 1 && !_formData.isStep2Valid()) {
+      context.showSnackBar('Información del vehículo incompleta o inválida',
+          isError: true);
+      return;
+    } else if (_currentStep == 2 && !_formData.isStep3Valid()) {
+      context.showSnackBar(
+          'Dirección o cuenta bancaria incompleta o inválida',
+          isError: true);
+      return;
+    } else if (_currentStep == 3 && !_formData.isStep4Valid()) {
+      if (!_formData.acceptedTerms) {
+        context.showSnackBar(
+            'Debes aceptar los términos y condiciones',
+            isError: true);
+      } else {
+        context.showSnackBar(
+            'Debe habilitar al menos ubicación o notificaciones',
+            isError: true);
+      }
+      return;
+    }
+
     if (_currentStep < 3) {
-      if (!_formKey.currentState!.validate()) return;
       setState(() => _currentStep++);
       return;
     }
@@ -241,7 +266,11 @@ class _SignUpScreenStepsState extends ConsumerState<SignUpScreenSteps> {
         hint: 'Ej: 1234567890',
         keyboardType: TextInputType.phone,
         prefixIcon: const Icon(Icons.phone_outlined),
-        validator: (v) => v == null || v.isEmpty ? 'Ingresa tu teléfono' : null,
+        validator: (v) {
+          if (v == null || v.isEmpty) return 'Ingresa tu teléfono';
+          if (!v.isValidPhone) return 'Teléfono inválido (9-15 dígitos)';
+          return null;
+        },
       ),
       const SizedBox(height: 16),
       DropdownButtonFormField<String>(
@@ -268,8 +297,11 @@ class _SignUpScreenStepsState extends ConsumerState<SignUpScreenSteps> {
         hint: 'Ej: 123456789',
         keyboardType: TextInputType.number,
         prefixIcon: const Icon(Icons.numbers),
-        validator: (v) =>
-            v == null || v.isEmpty ? 'Ingresa tu número de identificación' : null,
+        validator: (v) {
+          if (v == null || v.isEmpty) return 'Ingresa tu número de identificación';
+          if (!v.isValidIdentificationNumber) return 'Número de identificación inválido';
+          return null;
+        },
       ),
       const SizedBox(height: 16),
       AppTextField(
@@ -289,12 +321,136 @@ class _SignUpScreenStepsState extends ConsumerState<SignUpScreenSteps> {
         ),
         validator: (v) {
           if (v == null || v.isEmpty) return 'Ingresa tu contraseña';
-          if (v.length < 6) return 'Mínimo 6 caracteres';
+          if (!v.isStrongPassword) return v.passwordStrengthMessage;
           return null;
         },
       ),
+      const SizedBox(height: 12),
+      // Password strength indicator
+      Container(
+        padding: const EdgeInsets.all(12),
+        decoration: BoxDecoration(
+          color: _getPasswordStrengthColor().withValues(alpha: 0.1),
+          borderRadius: BorderRadius.circular(8),
+          border: Border.all(
+            color: _getPasswordStrengthColor(),
+            width: 1,
+          ),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Icon(
+                  _getPasswordStrengthIcon(),
+                  color: _getPasswordStrengthColor(),
+                  size: 16,
+                ),
+                const SizedBox(width: 8),
+                Text(
+                  _getPasswordStrengthLabel(),
+                  style: context.textTheme.bodySmall?.copyWith(
+                    color: _getPasswordStrengthColor(),
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 8),
+            Text(
+              'Requisitos:',
+              style: context.textTheme.labelSmall,
+            ),
+            const SizedBox(height: 4),
+            _buildPasswordRequirement('Mínimo 8 caracteres',
+                _passwordController.text.length >= 8),
+            _buildPasswordRequirement('1 mayúscula',
+                _passwordController.text.contains(RegExp(r'[A-Z]'))),
+            _buildPasswordRequirement('1 minúscula',
+                _passwordController.text.contains(RegExp(r'[a-z]'))),
+            _buildPasswordRequirement('1 número',
+                _passwordController.text.contains(RegExp(r'[0-9]'))),
+            _buildPasswordRequirement('1 carácter especial',
+                _passwordController.text.contains(RegExp(r'[!@#$%^&*()_+\-=\[\]{};:"\\|,.<>\/?]'))),
+          ],
+        ),
+      ),
       const SizedBox(height: 32),
     ];
+  }
+
+  Widget _buildPasswordRequirement(String label, bool met) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 2),
+      child: Row(
+        children: [
+          Icon(
+            met ? Icons.check_circle : Icons.radio_button_unchecked,
+            size: 14,
+            color: met ? AppColors.accent : AppColors.textHint,
+          ),
+          const SizedBox(width: 8),
+          Text(
+            label,
+            style: context.textTheme.bodySmall?.copyWith(
+              color: met ? AppColors.accent : AppColors.textHint,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Color _getPasswordStrengthColor() {
+    final password = _passwordController.text;
+    if (password.isEmpty) return AppColors.textHint;
+    
+    int strength = 0;
+    if (password.length >= 8) strength++;
+    if (password.contains(RegExp(r'[A-Z]'))) strength++;
+    if (password.contains(RegExp(r'[a-z]'))) strength++;
+    if (password.contains(RegExp(r'[0-9]'))) strength++;
+    if (password.contains(RegExp(r'[!@#$%^&*()_+\-=\[\]{};:"\\|,.<>\/?]'))) strength++;
+    
+    if (strength <= 2) return Colors.red;
+    if (strength == 3) return Colors.orange;
+    if (strength == 4) return Colors.amber;
+    return AppColors.accent;
+  }
+
+  IconData _getPasswordStrengthIcon() {
+    final password = _passwordController.text;
+    if (password.isEmpty) return Icons.info_outline;
+    
+    int strength = 0;
+    if (password.length >= 8) strength++;
+    if (password.contains(RegExp(r'[A-Z]'))) strength++;
+    if (password.contains(RegExp(r'[a-z]'))) strength++;
+    if (password.contains(RegExp(r'[0-9]'))) strength++;
+    if (password.contains(RegExp(r'[!@#$%^&*()_+\-=\[\]{};:"\\|,.<>\/?]'))) strength++;
+    
+    if (strength <= 2) return Icons.error_outline;
+    if (strength == 3) return Icons.warning_outlined;
+    if (strength == 4) return Icons.check_circle_outline;
+    return Icons.verified_outlined;
+  }
+
+  String _getPasswordStrengthLabel() {
+    final password = _passwordController.text;
+    if (password.isEmpty) return 'Escribe una contraseña';
+    
+    int strength = 0;
+    if (password.length >= 8) strength++;
+    if (password.contains(RegExp(r'[A-Z]'))) strength++;
+    if (password.contains(RegExp(r'[a-z]'))) strength++;
+    if (password.contains(RegExp(r'[0-9]'))) strength++;
+    if (password.contains(RegExp(r'[!@#$%^&*()_+\-=\[\]{};:"\\|,.<>\/?]'))) strength++;
+    
+    if (strength <= 2) return 'Contraseña débil';
+    if (strength == 3) return 'Contraseña regular';
+    if (strength == 4) return 'Contraseña fuerte';
+    return 'Contraseña muy fuerte';
   }
 
   List<Widget> _buildStep2VehicleInfo() {
@@ -334,21 +490,55 @@ class _SignUpScreenStepsState extends ConsumerState<SignUpScreenSteps> {
         AppTextField(
           controller: _licensePlateController,
           label: 'Placa del vehículo',
-          hint: 'Ej: ABC-123',
+          hint: 'Ej: ABC123',
           prefixIcon: const Icon(Icons.local_taxi),
-          validator: (v) => v == null || v.isEmpty
-              ? 'Ingresa la placa de tu vehículo'
-              : null,
+          validator: (v) {
+            if (v == null || v.isEmpty) {
+              return 'Ingresa la placa de tu vehículo';
+            }
+            if (!v.isValidLicensePlate) {
+              return 'Placa inválida (3-8 caracteres sin espacios)';
+            }
+            return null;
+          },
         ),
         const SizedBox(height: 16),
       ],
       AppTextField(
         controller: _licenseNumberController,
         label: 'Número de licencia de conducir',
-        hint: 'Ej: L123456',
+        hint: 'Ej: L123456789',
         prefixIcon: const Icon(Icons.card_membership),
-        validator: (v) =>
-            v == null || v.isEmpty ? 'Ingresa tu número de licencia' : null,
+        validator: (v) {
+          if (v == null || v.isEmpty) return 'Ingresa tu número de licencia';
+          if (!v.isValidLicenseNumber) {
+            return 'Licencia inválida (6-20 caracteres)';
+          }
+          return null;
+        },
+      ),
+      const SizedBox(height: 24),
+      Container(
+        padding: const EdgeInsets.all(16),
+        decoration: BoxDecoration(
+          color: AppColors.accent.withValues(alpha: 0.1),
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: AppColors.accent, width: 1),
+        ),
+        child: Row(
+          children: [
+            const Icon(Icons.info_outline, color: AppColors.accent),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Text(
+                'Asegúrate de que tus datos coincidan con tus documentos',
+                style: context.textTheme.bodySmall?.copyWith(
+                  color: AppColors.textSecondary,
+                ),
+              ),
+            ),
+          ],
+        ),
       ),
       const SizedBox(height: 32),
     ];
@@ -372,20 +562,27 @@ class _SignUpScreenStepsState extends ConsumerState<SignUpScreenSteps> {
       const SizedBox(height: 24),
       AppTextField(
         controller: _addressController,
-        label: 'Dirección',
-        hint: 'Calle Principal 123, Apto 4',
+        label: 'Dirección completa',
+        hint: 'Calle Principal 123, Apto 4, Ciudad',
         prefixIcon: const Icon(Icons.location_on_outlined),
         maxLines: 3,
-        validator: (v) => v == null || v.isEmpty ? 'Ingresa tu dirección' : null,
+        validator: (v) {
+          if (v == null || v.isEmpty) return 'Ingresa tu dirección';
+          if (!v.isValidAddress) return 'Dirección muy corta (mínimo 10 caracteres)';
+          return null;
+        },
       ),
       const SizedBox(height: 16),
       AppTextField(
         controller: _bankAccountController,
-        label: 'Cuenta bancaria (IBAN o número)',
+        label: 'Cuenta bancaria (IBAN)',
         hint: 'Ej: ES9121000418450200051332',
         prefixIcon: const Icon(Icons.account_balance),
-        validator: (v) =>
-            v == null || v.isEmpty ? 'Ingresa tu cuenta bancaria' : null,
+        validator: (v) {
+          if (v == null || v.isEmpty) return 'Ingresa tu cuenta bancaria';
+          if (!v.isValidIban) return 'IBAN inválido';
+          return null;
+        },
       ),
       const SizedBox(height: 24),
       Container(
@@ -401,7 +598,7 @@ class _SignUpScreenStepsState extends ConsumerState<SignUpScreenSteps> {
             const SizedBox(width: 12),
             Expanded(
               child: Text(
-                'Tus datos se mantienen seguros y confidenciales',
+                'Tus datos bancarios se mantienen seguros y confidenciales',
                 style: context.textTheme.bodySmall?.copyWith(
                   color: AppColors.textSecondary,
                 ),
@@ -561,6 +758,77 @@ class _SignUpScreenStepsState extends ConsumerState<SignUpScreenSteps> {
                     ),
                   ),
                 ),
+            ],
+          ),
+        ),
+      ),
+      const SizedBox(height: 24),
+      // Terms and Conditions
+      Card(
+        elevation: 0,
+        color: _formData.acceptedTerms
+            ? AppColors.primary.withValues(alpha: 0.05)
+            : Colors.transparent,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(12),
+          side: BorderSide(
+            color: _formData.acceptedTerms
+                ? AppColors.primary
+                : AppColors.border,
+          ),
+        ),
+        child: Padding(
+          padding: const EdgeInsets.all(16),
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Checkbox(
+                value: _formData.acceptedTerms,
+                onChanged: (v) =>
+                    setState(() => _formData.acceptedTerms = v ?? false),
+                fillColor: WidgetStateProperty.all(AppColors.primary),
+              ),
+              Expanded(
+                child: Padding(
+                  padding: const EdgeInsets.only(top: 8),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'Aceptar términos y condiciones',
+                        style: context.textTheme.titleSmall?.copyWith(
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                      const SizedBox(height: 4),
+                      RichText(
+                        text: TextSpan(
+                          text: 'He leído y acepto los ',
+                          style: context.textTheme.bodySmall,
+                          children: const [
+                            TextSpan(
+                              text: 'términos de servicio',
+                              style: TextStyle(
+                                color: AppColors.primary,
+                                decoration: TextDecoration.underline,
+                              ),
+                            ),
+                            TextSpan(text: ' y la '),
+                            TextSpan(
+                              text: 'política de privacidad',
+                              style: TextStyle(
+                                color: AppColors.primary,
+                                decoration: TextDecoration.underline,
+                              ),
+                            ),
+                            TextSpan(text: ' de ACME PEDIDOS.'),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
             ],
           ),
         ),

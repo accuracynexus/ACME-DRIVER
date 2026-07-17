@@ -15,6 +15,7 @@ import '../../features/history/presentation/screens/history_screen.dart';
 import '../../features/earnings/presentation/screens/earnings_screen.dart';
 import '../../features/profile/presentation/screens/profile_screen.dart';
 import '../../features/notifications/presentation/screens/notifications_screen.dart';
+import '../../features/chat/presentation/screens/chat_screen.dart';
 
 // Route name constants
 class AppRoutes {
@@ -30,6 +31,9 @@ class AppRoutes {
   static const earnings = '/earnings';
   static const profile = '/profile';
   static const notifications = '/notifications';
+
+  static String orderChat(String orderId, String code) =>
+      '/orders/chat/$orderId?code=${Uri.encodeComponent(code)}';
 }
 
 final routerProvider = Provider<GoRouter>((ref) {
@@ -106,6 +110,13 @@ final routerProvider = Provider<GoRouter>((ref) {
           GoRoute(
             path: AppRoutes.notifications,
             builder: (_, __) => const NotificationsScreen(),
+          ),
+          GoRoute(
+            path: '/orders/chat/:orderId',
+            builder: (_, state) => ChatScreen(
+              orderId: state.pathParameters['orderId']!,
+              orderCode: state.uri.queryParameters['code'] ?? '',
+            ),
           ),
         ],
       ),

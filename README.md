@@ -11,6 +11,8 @@ App Flutter para repartidores del ecosistema ACME PEDIDOS, conectada a Supabase.
 - **Historial**: entregas completadas/canceladas desde `order_assignments`.
 - **Ganancias**: resumen hoy / semana / total (suma de `delivery_fee` de entregas completadas) + liquidaciones (`driver_settlements`).
 - **Notificaciones in-app**: lista desde la tabla `notifications` con marcar leído y badge de no leídas.
+- **Chat del pedido**: conversación con cliente/comercio/soporte (`get_or_create_order_conversation` + `messages`), burbujas por rol, confirmaciones de lectura (`message_reads`), polling 4 s + realtime oportunista. Accesible desde el botón de chat en el mapa de la entrega activa.
+- **Foto de evidencia de entrega**: al confirmar la entrega puedes tomar una foto (cámara); se sube al bucket `driver-documents` (carpeta del driver, permitida por RLS), se genera URL firmada de 5 años y se registra en `order_evidences` (visible en la galería del admin web).
 
 ## Nota sobre ofertas
 
@@ -31,12 +33,11 @@ La app refresca ofertas y pedido activo cada 12 s (polling) y además intenta su
 Requieren `npm install` y el `.env` con `SUPABASE_SERVICE_ROLE_KEY`:
 
 - `node scripts/seed-test-order.js` — crea un pedido de prueba cerca del driver de prueba y lo despacha (genera la oferta). Úsalo para probar el flujo completo en la app.
-- `node scripts/dev-probe.js` / `dev-probe2.js` / `dev-probe3.js` — diagnósticos del backend (RPCs, RLS, realtime).
+- `node scripts/verify-e2e.js` — verificación integral: recorre login → online → oferta → aceptar → chat → estados → evidencia → entrega → historial con las mismas consultas que usa la app, y deja una oferta fresca lista.
+- `node scripts/dev-probe.js` / `dev-probe2.js` / `dev-probe3.js` / `dev-probe4.js` — diagnósticos del backend (RPCs, RLS, realtime, storage).
 
 Driver de prueba: `driver.test@acme.dev` / `AcmeDriver123!`
 
 ## Pendiente / futuro
 
 - **Push FCM en segundo plano**: hoy las notificaciones son locales (la app debe estar abierta). Para push reales hace falta crear un proyecto Firebase, añadir `google-services.json`, reintroducir `firebase_messaging` y un backend que envíe los push (las filas ya quedan en `notifications` con `channel='push'` y `status='queued'`).
-- Subida de evidencia de entrega (`order_evidences`) con foto.
-- Chat del pedido (`get_or_create_order_conversation`, `messages`).

@@ -5,10 +5,14 @@ import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:geolocator/geolocator.dart';
+import 'package:go_router/go_router.dart';
+import 'package:image_picker/image_picker.dart';
 import 'package:latlong2/latlong.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../../../../core/constants/app_colors.dart';
 import '../../../../core/extensions/extensions.dart';
+import '../../../../core/router/app_router.dart';
+import '../../../../core/services/evidence_service.dart';
 import '../../../../core/services/route_service.dart';
 import '../../../../shared/widgets/common_widgets.dart';
 import '../../domain/entities/order.dart';
@@ -114,36 +118,60 @@ class _ActiveOrderScreenState extends ConsumerState<ActiveOrderScreen> {
     final next = order.status.next;
     if (next == null) return;
 
-    // Confirmación solo para la entrega final.
+    // Entrega final: confirmar y ofrecer foto de evidencia.
+    XFile? evidencePhoto;
     if (next == OrderStatus.delivered) {
-      final confirmed = await showDialog<bool>(
+      final choice = await showDialog<String>(
         context: context,
         builder: (ctx) => AlertDialog(
           title: const Text('Confirmar entrega'),
           content: Text(
-              '¿Entregaste el pedido ${order.code} a ${order.recipientName}?'),
+              '¿Entregaste el pedido ${order.code} a ${order.recipientName}?\n\n'
+              'Puedes tomar una foto como evidencia de la entrega.'),
           actions: [
             TextButton(
-              onPressed: () => Navigator.pop(ctx, false),
+              onPressed: () => Navigator.pop(ctx),
               child: const Text('Aún no'),
             ),
-            ElevatedButton(
-              onPressed: () => Navigator.pop(ctx, true),
-              child: const Text('Sí, entregado'),
+            TextButton(
+              onPressed: () => Navigator.pop(ctx, 'no_photo'),
+              child: const Text('Sin foto'),
+            ),
+            ElevatedButton.icon(
+              onPressed: () => Navigator.pop(ctx, 'photo'),
+              icon: const Icon(Icons.camera_alt, size: 18),
+              label: const Text('Foto y entregar'),
             ),
           ],
         ),
       );
-      if (confirmed != true) return;
+      if (choice == null) return;
+
+      if (choice == 'photo') {
+        evidencePhoto = await ImagePicker().pickImage(
+          source: ImageSource.camera,
+          imageQuality: 70,
+          maxWidth: 1600,
+        );
+        if (evidencePhoto == null) return; // canceló la cámara
+      }
     }
 
     setState(() => _busy = true);
     try {
+      if (evidencePhoto != null) {
+        await ref.read(evidenceServiceProvider).uploadDeliveryPhoto(
+              orderId: order.orderId,
+              image: evidencePhoto,
+            );
+      }
       await ref.read(activeOrderProvider.notifier).advanceStatus();
       ref.read(routeServiceProvider).clear();
       _route = null;
       if (mounted && next == OrderStatus.delivered) {
-        context.showSnackBar('¡Entrega completada! 🎉');
+        context.showSnackBar(evidencePhoto != null
+            ? '¡Entrega completada con evidencia! 🎉'
+            : '¡Entrega completada! 🎉');
       }
     } catch (e) {
       if (mounted) context.showSnackBar('$e', isError: true);
@@ -346,6 +374,13 @@ class _ActiveOrderScreenState extends ConsumerState<ActiveOrderScreen> {
                 tooltip: 'Abrir en Google Maps',
                 onTap: () => _launch(Uri.parse(
                     'https://www.google.com/maps/dir/?api=1&destination=${target.latitude},${target.longitude}&travelmode=driving')),
+              ),
+              const SizedBox(height: 10),
+              _RoundButton(
+                icon: Icons.chat_bubble_outline,
+                tooltip: 'Chat del pedido',
+                onTap: () => context.push(
+                    AppRoutes.orderChat(order.orderId, order.code)),
               ),
             ],
           ),

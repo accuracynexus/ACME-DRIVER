@@ -26,6 +26,10 @@
 	<string>$(FLUTTER_BUILD_NUMBER)</string>
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
+	<key>NSCameraUsageDescription</key>
+	<string>ACME-DRIVER usa la cámara para tomar la foto de evidencia de entrega.</string>
+	<key>NSPhotoLibraryUsageDescription</key>
+	<string>ACME-DRIVER puede adjuntar fotos de tu galería como evidencia de entrega.</string>
 	<key>NSLocationWhenInUseUsageDescription</key>
 	<string>ACME-DRIVER usa tu ubicación para asignarte pedidos cercanos y compartir tu posición durante las entregas.</string>
 	<key>NSLocationAlwaysAndWhenInUseUsageDescription</key>

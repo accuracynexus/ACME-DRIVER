@@ -14,6 +14,9 @@ class DeliveryOrder extends Equatable {
   final double subtotal;
   final double deliveryFee;
   final double total;
+  final String paymentStatus; // pending, paid, ...
+  final String paymentMethodCode; // cash, yape, plin, card_online, card_pos
+  final String paymentMethodName;
   final String? specialInstructions;
   final DateTime? placedAt;
 
@@ -47,6 +50,9 @@ class DeliveryOrder extends Equatable {
     required this.subtotal,
     required this.deliveryFee,
     required this.total,
+    this.paymentStatus = 'pending',
+    this.paymentMethodCode = '',
+    this.paymentMethodName = '',
     this.specialInstructions,
     this.placedAt,
     required this.branchName,
@@ -65,6 +71,10 @@ class DeliveryOrder extends Equatable {
   });
 
   String get code => '#$orderCode';
+
+  /// El repartidor debe cobrar al entregar (pago contra entrega no pagado).
+  bool get mustCollectPayment =>
+      paymentStatus != 'paid' && paymentMethodCode != 'card_online';
 
   bool get hasCoordinates =>
       (branchLat != 0 || branchLng != 0) && (deliveryLat != 0 || deliveryLng != 0);

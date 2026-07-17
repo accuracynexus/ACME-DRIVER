@@ -7,6 +7,9 @@ class AppConstants {
   // Intervalo de envío de ubicación (segundos)
   static const int locationUpdateInterval = 10;
 
+  // Intervalo de envío de ubicación durante una entrega activa (segundos)
+  static const int activeDeliveryPingInterval = 5;
+
   // Intervalo de refresco de ofertas/pedido activo (segundos)
   static const int ordersPollInterval = 12;
 

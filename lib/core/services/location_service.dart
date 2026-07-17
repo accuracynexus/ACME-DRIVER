@@ -20,12 +20,21 @@ class LocationService {
   Timer? _timer;
   Position? lastPosition;
 
-  /// Si hay un pedido activo, el ping se asocia a ese pedido.
-  String? currentOrderId;
+  String? _currentOrderId;
 
   LocationService(this._client);
 
   bool get isRunning => _timer != null;
+
+  /// Si hay un pedido activo, el ping se asocia a ese pedido y se acelera
+  /// para que el rastreo del cliente sea más fluido.
+  set currentOrderId(String? orderId) {
+    final changed = _currentOrderId != orderId;
+    _currentOrderId = orderId;
+    if (changed && isRunning) start();
+  }
+
+  String? get currentOrderId => _currentOrderId;
 
   Future<bool> ensurePermission() async {
     var enabled = await Geolocator.isLocationServiceEnabled();
@@ -56,10 +65,10 @@ class LocationService {
   /// Inicia el envío periódico de ubicación.
   void start() {
     stop();
-    _timer = Timer.periodic(
-      const Duration(seconds: AppConstants.locationUpdateInterval),
-      (_) => _ping(),
-    );
+    final seconds = _currentOrderId != null
+        ? AppConstants.activeDeliveryPingInterval
+        : AppConstants.locationUpdateInterval;
+    _timer = Timer.periodic(Duration(seconds: seconds), (_) => _ping());
     _ping();
   }
 
@@ -78,7 +87,7 @@ class LocationService {
         'p_accuracy': pos.accuracy,
         'p_speed': pos.speed * 3.6, // m/s -> km/h
         'p_heading': pos.heading,
-        if (currentOrderId != null) 'p_order_id': currentOrderId,
+        if (_currentOrderId != null) 'p_order_id': _currentOrderId,
       });
     } catch (e) {
       debugPrint('LocationService.ping: $e');

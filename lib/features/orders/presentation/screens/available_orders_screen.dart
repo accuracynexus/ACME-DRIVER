@@ -154,6 +154,20 @@ class _OfferCardState extends ConsumerState<_OfferCard> {
                 iconColor: AppColors.info,
               ),
             ],
+            const SizedBox(height: 8),
+            InfoTile(
+              icon: offer.mustCollectPayment
+                  ? Icons.payments_outlined
+                  : Icons.check_circle_outline,
+              title: 'Pago',
+              value: offer.mustCollectPayment
+                  ? 'Cobrar ${offer.total.toCurrency}'
+                      '${offer.paymentMethodName.isNotEmpty ? ' · ${offer.paymentMethodName}' : ''}'
+                  : 'Pagado online — no cobrar',
+              iconColor: offer.mustCollectPayment
+                  ? AppColors.warning
+                  : AppColors.success,
+            ),
             const SizedBox(height: 16),
             Row(
               children: [

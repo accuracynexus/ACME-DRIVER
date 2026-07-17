@@ -13,6 +13,9 @@ class DeliveryOrderModel extends DeliveryOrder {
     required super.subtotal,
     required super.deliveryFee,
     required super.total,
+    super.paymentStatus,
+    super.paymentMethodCode,
+    super.paymentMethodName,
     super.specialInstructions,
     super.placedAt,
     required super.branchName,
@@ -51,6 +54,13 @@ class DeliveryOrderModel extends DeliveryOrder {
       subtotal: _num(order['subtotal']),
       deliveryFee: _num(order['delivery_fee']),
       total: _num(order['total']),
+      paymentStatus: order['payment_status'] as String? ?? 'pending',
+      paymentMethodCode: (order['payment_method']
+              as Map<String, dynamic>?)?['code'] as String? ??
+          '',
+      paymentMethodName: (order['payment_method']
+              as Map<String, dynamic>?)?['name'] as String? ??
+          '',
       specialInstructions: order['special_instructions'] as String?,
       placedAt: _date(order['placed_at']),
       branchName: branch['name'] as String? ?? 'Local',

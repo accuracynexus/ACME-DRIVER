@@ -27,7 +27,8 @@ class OrderRemoteDataSourceImpl implements OrderRemoteDataSource {
     id, order_id, status, assigned_at, accepted_at, completed_at,
     order:orders (
       id, order_code, status, subtotal, delivery_fee, total,
-      special_instructions, placed_at,
+      payment_status, special_instructions, placed_at,
+      payment_method:payment_methods ( code, name ),
       branch:merchant_branches ( id, name, phone, lat, lng ),
       delivery:order_delivery_details ( address_snapshot, reference_snapshot,
         lat, lng, recipient_name, recipient_phone,

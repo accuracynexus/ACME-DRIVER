@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:phosphor_flutter/phosphor_flutter.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../../core/constants/app_colors.dart';
 import '../../../../core/extensions/extensions.dart';
@@ -70,7 +71,7 @@ class _ForgotPasswordScreenState extends ConsumerState<ForgotPasswordScreen> {
             label: 'Correo electrónico',
             hint: 'tu@correo.com',
             keyboardType: TextInputType.emailAddress,
-            prefixIcon: const Icon(Icons.email_outlined),
+            prefixIcon: const Icon(PhosphorIconsRegular.envelopeSimple),
             validator: (v) {
               if (v == null || v.isEmpty) return 'Ingresa tu correo';
               if (!v.isValidEmail) return 'Correo inválido';
@@ -97,11 +98,11 @@ class _ForgotPasswordScreenState extends ConsumerState<ForgotPasswordScreen> {
             width: 80,
             height: 80,
             decoration: BoxDecoration(
-              color: AppColors.success.withOpacity(0.1),
+              color: AppColors.success.withValues(alpha: 0.1),
               shape: BoxShape.circle,
             ),
             child: const Icon(
-              Icons.check_circle_outline,
+              PhosphorIconsRegular.checkCircle,
               color: AppColors.success,
               size: 48,
             ),

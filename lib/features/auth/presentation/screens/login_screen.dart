@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'package:phosphor_flutter/phosphor_flutter.dart';
+import '../../../../core/constants/app_assets.dart';
 import '../../../../core/constants/app_colors.dart';
 import '../../../../core/constants/app_strings.dart';
 import '../../../../core/extensions/extensions.dart';
@@ -32,7 +34,6 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
 
   Future<void> _handleLogin() async {
     if (!_formKey.currentState!.validate()) return;
-
     setState(() => _isLoading = true);
     try {
       await ref.read(currentDriverProvider.notifier).signIn(
@@ -40,9 +41,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
             _passwordController.text.trim(),
           );
     } catch (e) {
-      if (mounted) {
-        context.showSnackBar(e.toString(), isError: true);
-      }
+      if (mounted) context.showSnackBar(e.toString(), isError: true);
     } finally {
       if (mounted) setState(() => _isLoading = false);
     }
@@ -59,39 +58,23 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
+                const SizedBox(height: 32),
+                Center(
+                  child: Image.asset(AppAssets.logo, width: 200),
+                ),
                 const SizedBox(height: 40),
-                // Header
-                Container(
-                  width: 64,
-                  height: 64,
-                  decoration: BoxDecoration(
-                    gradient: AppColors.primaryGradient,
-                    borderRadius: BorderRadius.circular(16),
-                  ),
-                  child: const Icon(
-                    Icons.delivery_dining_rounded,
-                    size: 36,
-                    color: Colors.white,
-                  ),
-                ),
-                const SizedBox(height: 28),
-                Text(
-                  'Bienvenido de vuelta',
-                  style: context.textTheme.headlineMedium,
-                ),
+                Text('Bienvenido de vuelta',
+                    style: context.textTheme.headlineMedium),
                 const SizedBox(height: 6),
-                Text(
-                  'Inicia sesión para continuar como repartidor',
-                  style: context.textTheme.bodyMedium,
-                ),
-                const SizedBox(height: 40),
-                // Email field
+                Text('Inicia sesión para continuar como repartidor',
+                    style: context.textTheme.bodyMedium),
+                const SizedBox(height: 32),
                 AppTextField(
                   controller: _emailController,
                   label: AppStrings.email,
                   hint: 'tu@correo.com',
                   keyboardType: TextInputType.emailAddress,
-                  prefixIcon: const Icon(Icons.email_outlined),
+                  prefixIcon: const Icon(PhosphorIconsRegular.envelopeSimple),
                   validator: (v) {
                     if (v == null || v.isEmpty) return 'Ingresa tu correo';
                     if (!v.isValidEmail) return 'Correo inválido';
@@ -99,19 +82,16 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                   },
                 ),
                 const SizedBox(height: 16),
-                // Password field
                 AppTextField(
                   controller: _passwordController,
                   label: AppStrings.password,
                   hint: '••••••••',
                   obscureText: _obscurePassword,
-                  prefixIcon: const Icon(Icons.lock_outline),
+                  prefixIcon: const Icon(PhosphorIconsRegular.lockSimple),
                   suffixIcon: IconButton(
-                    icon: Icon(
-                      _obscurePassword
-                          ? Icons.visibility_outlined
-                          : Icons.visibility_off_outlined,
-                    ),
+                    icon: Icon(_obscurePassword
+                        ? PhosphorIconsRegular.eye
+                        : PhosphorIconsRegular.eyeSlash),
                     onPressed: () =>
                         setState(() => _obscurePassword = !_obscurePassword),
                   ),
@@ -121,18 +101,18 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                     return null;
                   },
                 ),
-                const SizedBox(height: 12),
+                const SizedBox(height: 8),
                 Align(
                   alignment: Alignment.centerRight,
                   child: TextButton(
                     onPressed: () => context.push(AppRoutes.forgotPassword),
-                    child: const Text(
-                      AppStrings.forgotPassword,
-                      style: TextStyle(color: AppColors.primary),
-                    ),
+                    child: const Text(AppStrings.forgotPassword,
+                        style: TextStyle(
+                            color: AppColors.primary,
+                            fontWeight: FontWeight.w600)),
                   ),
                 ),
-                const SizedBox(height: 24),
+                const SizedBox(height: 16),
                 AppButton(
                   label: AppStrings.login,
                   isLoading: _isLoading,
@@ -150,16 +130,15 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                           TextSpan(
                             text: 'Regístrate aquí',
                             style: TextStyle(
-                              color: AppColors.primary,
-                              fontWeight: FontWeight.bold,
-                            ),
+                                color: AppColors.primary,
+                                fontWeight: FontWeight.bold),
                           ),
                         ],
                       ),
                     ),
                   ),
                 ),
-                const SizedBox(height: 32),
+                const SizedBox(height: 24),
                 Center(
                   child: Text(
                     'Solo repartidores autorizados por ACME PEDIDOS\npueden acceder a esta aplicación.',
@@ -167,6 +146,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                     style: context.textTheme.bodySmall,
                   ),
                 ),
+                const SizedBox(height: 24),
               ],
             ),
           ),

@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import '../../../../core/constants/app_assets.dart';
 import '../../../../core/constants/app_colors.dart';
 
 class SplashScreen extends ConsumerWidget {
@@ -7,55 +8,39 @@ class SplashScreen extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    // Router handles redirect after auth check
+    final logoWidth = MediaQuery.of(context).size.width * 0.62;
     return Scaffold(
       body: Container(
-        decoration: const BoxDecoration(
-          gradient: AppColors.primaryGradient,
-        ),
+        width: double.infinity,
+        height: double.infinity,
+        color: AppColors.accent,
         child: Center(
           child: Column(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              // Logo container
-              Container(
-                width: 100,
-                height: 100,
-                decoration: BoxDecoration(
-                  color: Colors.white.withOpacity(0.15),
-                  borderRadius: BorderRadius.circular(24),
-                ),
-                child: const Icon(
-                  Icons.delivery_dining_rounded,
-                  size: 56,
-                  color: Colors.white,
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 32),
+                child: Image.asset(
+                  AppAssets.logoWhite,
+                  width: logoWidth,
+                  fit: BoxFit.contain,
                 ),
               ),
-              const SizedBox(height: 24),
-              const Text(
-                'ACME-DRIVER',
-                style: TextStyle(
-                  fontFamily: 'Inter',
-                  fontSize: 28,
-                  fontWeight: FontWeight.w700,
-                  color: Colors.white,
-                  letterSpacing: 1.2,
-                ),
-              ),
-              const SizedBox(height: 8),
+              const SizedBox(height: 16),
               Text(
                 'App de Repartidores',
                 style: TextStyle(
                   fontFamily: 'Inter',
                   fontSize: 14,
-                  fontWeight: FontWeight.w400,
-                  color: Colors.white.withOpacity(0.7),
+                  fontWeight: FontWeight.w500,
+                  color: Colors.white.withValues(alpha: 0.9),
+                  letterSpacing: 0.5,
                 ),
               ),
-              const SizedBox(height: 60),
+              const SizedBox(height: 56),
               const SizedBox(
-                width: 32,
-                height: 32,
+                width: 30,
+                height: 30,
                 child: CircularProgressIndicator(
                   color: Colors.white,
                   strokeWidth: 2.5,

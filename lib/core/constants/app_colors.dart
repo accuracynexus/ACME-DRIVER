@@ -43,9 +43,26 @@ class AppColors {
   static const Color error = Color(0xFFC62828);
   static const Color info = Color(0xFF0288D1);
 
-  // Gradients
+  // Shadow
+  static const Color shadow = Color(0x1A4D148C);
+
+  // Gradients — alineados a la marca (morado + naranja)
   static const LinearGradient primaryGradient = LinearGradient(
-    colors: [Color(0xFF0D47A1), Color(0xFF1565C0)],
+    colors: [Color(0xFF4D148C), Color(0xFF7C3BB3)],
+    begin: Alignment.topLeft,
+    end: Alignment.bottomRight,
+  );
+
+  static const LinearGradient accentGradient = LinearGradient(
+    colors: [Color(0xFFFF6200), Color(0xFFFF8C42)],
+    begin: Alignment.topLeft,
+    end: Alignment.bottomRight,
+  );
+
+  // Gradiente "hero" que combina los dos colores del logo
+  static const LinearGradient brandGradient = LinearGradient(
+    colors: [Color(0xFF4D148C), Color(0xFF8A2BBd), Color(0xFFFF6200)],
+    stops: [0.0, 0.55, 1.0],
     begin: Alignment.topLeft,
     end: Alignment.bottomRight,
   );

@@ -1,129 +1,125 @@
-import 'dart:async';
-
 import 'package:flutter/material.dart';
-import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
-import '../../../../core/constants/app_constants.dart';
+import 'package:phosphor_flutter/phosphor_flutter.dart';
+import '../../../../core/constants/app_colors.dart';
 import '../../../../core/router/app_router.dart';
-import '../../../../core/services/location_service.dart';
-import '../../../../core/services/notification_service.dart';
-import '../../../auth/presentation/providers/auth_provider.dart';
-import '../../../notifications/presentation/providers/notification_provider.dart';
-import '../../../orders/presentation/providers/order_provider.dart';
 
-class MainShell extends ConsumerStatefulWidget {
+class MainShell extends StatelessWidget {
   final Widget child;
-
   const MainShell({super.key, required this.child});
 
-  @override
-  ConsumerState<MainShell> createState() => _MainShellState();
-}
+  static const _routes = [
+    AppRoutes.home,
+    AppRoutes.availableOrders,
+    AppRoutes.history,
+    AppRoutes.earnings,
+    AppRoutes.profile,
+  ];
 
-class _MainShellState extends ConsumerState<MainShell> {
-  Timer? _notificationsTimer;
+  static const _items = [
+    _NavData(PhosphorIconsRegular.house, PhosphorIconsFill.house, 'Inicio'),
+    _NavData(PhosphorIconsRegular.package, PhosphorIconsFill.package, 'Pedidos'),
+    _NavData(PhosphorIconsRegular.clockCounterClockwise,
+        PhosphorIconsFill.clockCounterClockwise, 'Historial'),
+    _NavData(PhosphorIconsRegular.wallet, PhosphorIconsFill.wallet, 'Ganancias'),
+    _NavData(PhosphorIconsRegular.user, PhosphorIconsFill.user, 'Perfil'),
+  ];
 
-  @override
-  void initState() {
-    super.initState();
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      ref.read(notificationServiceProvider).initialize();
-      ref.read(locationServiceProvider).ensurePermission();
-      ref.read(orderSyncProvider).start();
-
-      // Si el repartidor ya estaba en línea, retomar el envío de ubicación.
-      final driver = ref.read(currentDriverProvider).value;
-      if (driver?.isOnline == true) {
-        ref.read(locationServiceProvider).start();
-      }
-
-      _notificationsTimer = Timer.periodic(
-        const Duration(seconds: AppConstants.notificationsPollInterval),
-        (_) => ref.invalidate(notificationsProvider),
-      );
-    });
-  }
-
-  @override
-  void dispose() {
-    _notificationsTimer?.cancel();
-    super.dispose();
-  }
-
-  int _calculateSelectedIndex(BuildContext context) {
-    final String location = GoRouterState.of(context).uri.path;
-    if (location.startsWith(AppRoutes.home)) return 0;
-    if (location.startsWith(AppRoutes.availableOrders)) return 1;
-    if (location.startsWith(AppRoutes.history)) return 2;
-    if (location.startsWith(AppRoutes.earnings)) return 3;
-    if (location.startsWith(AppRoutes.profile)) return 4;
+  int _selectedIndex(BuildContext context) {
+    final loc = GoRouterState.of(context).uri.path;
+    if (loc.startsWith(AppRoutes.availableOrders)) return 1;
+    if (loc.startsWith(AppRoutes.history)) return 2;
+    if (loc.startsWith(AppRoutes.earnings)) return 3;
+    if (loc.startsWith(AppRoutes.profile)) return 4;
     return 0;
-  }
-
-  void _onItemTapped(int index, BuildContext context) {
-    switch (index) {
-      case 0:
-        context.go(AppRoutes.home);
-        break;
-      case 1:
-        context.go(AppRoutes.availableOrders);
-        break;
-      case 2:
-        context.go(AppRoutes.history);
-        break;
-      case 3:
-        context.go(AppRoutes.earnings);
-        break;
-      case 4:
-        context.go(AppRoutes.profile);
-        break;
-    }
   }
 
   @override
   Widget build(BuildContext context) {
+    final index = _selectedIndex(context);
     return Scaffold(
-      body: widget.child,
+      extendBody: true,
+      body: child,
       bottomNavigationBar: Container(
-        decoration: BoxDecoration(
+        decoration: const BoxDecoration(
+          color: AppColors.surface,
+          borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
           boxShadow: [
             BoxShadow(
-              color: Colors.black.withOpacity(0.05),
-              blurRadius: 10,
-              offset: const Offset(0, -5),
-            ),
+                color: Color(0x22000000), blurRadius: 24, offset: Offset(0, -6)),
           ],
         ),
-        child: BottomNavigationBar(
-          currentIndex: _calculateSelectedIndex(context),
-          onTap: (index) => _onItemTapped(index, context),
-          items: const [
-            BottomNavigationBarItem(
-              icon: Icon(Icons.home_outlined),
-              activeIcon: Icon(Icons.home),
-              label: 'Inicio',
+        child: SafeArea(
+          top: false,
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 10),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.spaceAround,
+              children: List.generate(_items.length, (i) {
+                return _NavButton(
+                  data: _items[i],
+                  active: i == index,
+                  onTap: () => context.go(_routes[i]),
+                );
+              }),
             ),
-            BottomNavigationBarItem(
-              icon: Icon(Icons.list_alt_outlined),
-              activeIcon: Icon(Icons.list_alt),
-              label: 'Pedidos',
-            ),
-            BottomNavigationBarItem(
-              icon: Icon(Icons.history_outlined),
-              activeIcon: Icon(Icons.history),
-              label: 'Historial',
-            ),
-            BottomNavigationBarItem(
-              icon: Icon(Icons.account_balance_wallet_outlined),
-              activeIcon: Icon(Icons.account_balance_wallet),
-              label: 'Ganancias',
-            ),
-            BottomNavigationBarItem(
-              icon: Icon(Icons.person_outline),
-              activeIcon: Icon(Icons.person),
-              label: 'Perfil',
-            ),
-          ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _NavData {
+  final IconData icon;
+  final IconData activeIcon;
+  final String label;
+  const _NavData(this.icon, this.activeIcon, this.label);
+}
+
+class _NavButton extends StatelessWidget {
+  final _NavData data;
+  final bool active;
+  final VoidCallback onTap;
+  const _NavButton(
+      {required this.data, required this.active, required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    return Expanded(
+      child: GestureDetector(
+        behavior: HitTestBehavior.opaque,
+        onTap: onTap,
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 220),
+          curve: Curves.easeOut,
+          margin: const EdgeInsets.symmetric(horizontal: 4),
+          padding: const EdgeInsets.symmetric(vertical: 8),
+          decoration: BoxDecoration(
+            color: active
+                ? AppColors.primary.withValues(alpha: 0.10)
+                : Colors.transparent,
+            borderRadius: BorderRadius.circular(16),
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(
+                active ? data.activeIcon : data.icon,
+                size: 24,
+                color: active ? AppColors.primary : AppColors.textHint,
+              ),
+              const SizedBox(height: 4),
+              Text(
+                data.label,
+                style: TextStyle(
+                  fontSize: 11,
+                  fontWeight: active ? FontWeight.w700 : FontWeight.w500,
+                  color: active ? AppColors.primary : AppColors.textHint,
+                ),
+              ),
+            ],
+          ),
         ),
       ),
     );

@@ -54,32 +54,42 @@ class RouteService {
       return _lastResult;
     }
 
+    final result = await getRouteThrough([origin, target]);
+    if (result != null) {
+      _lastOrigin = origin;
+      _lastTarget = target;
+      _lastResult = result;
+    }
+    return result ?? _lastResult;
+  }
+
+  /// Ruta por calles que atraviesa una lista ordenada de puntos
+  /// (p. ej. repartidor → local → cliente). Devuelve null si falla.
+  Future<RouteResult?> getRouteThrough(List<LatLng> waypoints) async {
+    if (waypoints.length < 2) return null;
     try {
-      final url =
-          'https://router.project-osrm.org/route/v1/driving/'
-          '${origin.longitude},${origin.latitude};'
-          '${target.longitude},${target.latitude}'
-          '?overview=full&geometries=geojson';
+      final coordsPath = waypoints
+          .map((p) => '${p.longitude},${p.latitude}')
+          .join(';');
+      final url = 'https://router.project-osrm.org/route/v1/driving/'
+          '$coordsPath?overview=full&geometries=geojson';
       final res = await _dio.get(url);
       final routes = res.data['routes'] as List?;
-      if (routes == null || routes.isEmpty) return _lastResult;
+      if (routes == null || routes.isEmpty) return null;
 
       final route = routes.first;
       final coords = (route['geometry']['coordinates'] as List)
           .map((c) => LatLng((c[1] as num).toDouble(), (c[0] as num).toDouble()))
           .toList();
 
-      _lastOrigin = origin;
-      _lastTarget = target;
-      _lastResult = RouteResult(
+      return RouteResult(
         points: coords,
         distanceMeters: (route['distance'] as num).toDouble(),
         durationSeconds: (route['duration'] as num).toDouble(),
       );
-      return _lastResult;
     } catch (e) {
       debugPrint('RouteService: $e');
-      return _lastResult;
+      return null;
     }
   }
 

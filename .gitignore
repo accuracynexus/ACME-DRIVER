@@ -51,3 +51,6 @@ GoogleService-Info.plist
 
 # Node modules (si hay tooling JS)
 node_modules/
+
+# Archivos temporales de desarrollo
+tmp_*

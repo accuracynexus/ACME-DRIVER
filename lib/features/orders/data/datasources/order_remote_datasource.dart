@@ -1,135 +1,159 @@
+import 'dart:typed_data';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import '../../../../core/constants/app_constants.dart';
 import '../../../../core/errors/app_exceptions.dart';
-import '../../domain/entities/order.dart';
 import 'order_model.dart';
+import 'order_assignment_model.dart';
+
+const _orderSelect =
+    '*, order_delivery_details(*), '
+    'payment_method:payment_methods(code,name), '
+    'merchant_branches(name,phone,lat,lng,addresses(line1,district,city,reference))';
+const _assignmentSelect = '*, orders($_orderSelect)';
 
 abstract class OrderRemoteDataSource {
-  /// Ofertas pendientes de aceptar (assignments en estado 'assigned').
-  Future<List<DeliveryOrderModel>> getOffers(String driverId);
+  Future<OrderModel?> getActiveOrder(String driverId);
+  Future<List<OrderModel>> getOrderHistory(String driverId);
+  Future<OrderAssignmentModel?> getPendingOffer(String driverId);
 
-  /// Entrega activa (assignment aceptado cuyo pedido sigue en curso).
-  Future<DeliveryOrderModel?> getActiveDelivery(String driverId);
+  /// Stream crudo de asignaciones del repartidor (para detectar ofertas).
+  Stream<List<Map<String, dynamic>>> watchAssignments(String driverId);
 
-  /// Entregas completadas / canceladas.
-  Future<List<DeliveryOrderModel>> getHistory(String driverId, {int limit});
-
-  Future<void> acceptOffer(String assignmentId);
+  Future<String> acceptOffer(String assignmentId);
   Future<void> rejectOffer(String assignmentId, {String? reason});
-  Future<void> advanceOrderStatus(String orderId, OrderStatus toStatus);
+  Future<void> advanceStatus(String orderId, String toStatus);
+
+  Future<void> submitEvidence(
+      String orderId, String fileUrl, String evidenceType, {String? note});
+
+  /// Sube una foto de evidencia al bucket privado y la registra.
+  Future<void> uploadDeliveryPhoto(String orderId, Uint8List bytes);
+
+  Future<void> recordCashCollection(String orderId, double amount);
 }
 
 class OrderRemoteDataSourceImpl implements OrderRemoteDataSource {
   final SupabaseClient _client;
-
   OrderRemoteDataSourceImpl(this._client);
 
-  static const _select = '''
-    id, order_id, status, assigned_at, accepted_at, completed_at,
-    order:orders (
-      id, order_code, status, subtotal, delivery_fee, total,
-      payment_status, special_instructions, placed_at,
-      payment_method:payment_methods ( code, name ),
-      branch:merchant_branches ( id, name, phone, lat, lng ),
-      delivery:order_delivery_details ( address_snapshot, reference_snapshot,
-        lat, lng, recipient_name, recipient_phone,
-        estimated_distance_km, estimated_time_min ),
-      items:order_items ( product_name_snapshot, quantity, unit_price, line_total )
-    )''';
-
   @override
-  Future<List<DeliveryOrderModel>> getOffers(String driverId) async {
-    try {
-      final data = await _client
-          .from('order_assignments')
-          .select(_select)
-          .eq('driver_id', driverId)
-          .eq('status', 'assigned')
-          .order('assigned_at', ascending: false);
+  Future<OrderModel?> getActiveOrder(String driverId) async {
+    final data = await _client
+        .from(AppConstants.ordersTable)
+        .select(_orderSelect)
+        .eq('current_driver_id', driverId)
+        .inFilter('status', ['driver_accepted', 'picked_up', 'on_the_way'])
+        .order('accepted_at', ascending: false)
+        .limit(1)
+        .maybeSingle();
 
-      return (data as List)
-          .map((e) => DeliveryOrderModel.fromAssignmentJson(e))
-          .where((o) => o.status == OrderStatus.assigned)
-          .toList();
-    } catch (e) {
-      throw OrderException('No se pudieron cargar las ofertas: $e');
-    }
+    return data == null ? null : OrderModel.fromJson(data);
   }
 
   @override
-  Future<DeliveryOrderModel?> getActiveDelivery(String driverId) async {
-    try {
-      final data = await _client
-          .from('order_assignments')
-          .select(_select)
-          .eq('driver_id', driverId)
-          .eq('status', 'accepted')
-          .order('accepted_at', ascending: false)
-          .limit(1);
+  Future<List<OrderModel>> getOrderHistory(String driverId) async {
+    final data = await _client
+        .from(AppConstants.ordersTable)
+        .select(_orderSelect)
+        .eq('current_driver_id', driverId)
+        .inFilter('status', ['delivered', 'cancelled', 'failed'])
+        .order('created_at', ascending: false)
+        .limit(AppConstants.pageSize);
 
-      final list = (data as List)
-          .map((e) => DeliveryOrderModel.fromAssignmentJson(e))
-          .where((o) => o.status.isActiveForDriver)
-          .toList();
-      return list.isEmpty ? null : list.first;
-    } catch (e) {
-      throw OrderException('No se pudo cargar el pedido activo: $e');
-    }
+    return (data as List)
+        .map((e) => OrderModel.fromJson(e as Map<String, dynamic>))
+        .toList();
   }
 
   @override
-  Future<List<DeliveryOrderModel>> getHistory(String driverId,
-      {int limit = 50}) async {
-    try {
-      final data = await _client
-          .from('order_assignments')
-          .select(_select)
-          .eq('driver_id', driverId)
-          .inFilter('status', ['completed', 'cancelled'])
-          .order('assigned_at', ascending: false)
-          .limit(limit);
+  Future<OrderAssignmentModel?> getPendingOffer(String driverId) async {
+    final data = await _client
+        .from(AppConstants.orderAssignmentsTable)
+        .select(_assignmentSelect)
+        .eq('driver_id', driverId)
+        .eq('status', 'assigned')
+        .order('assigned_at', ascending: false)
+        .limit(1)
+        .maybeSingle();
 
-      return (data as List)
-          .map((e) => DeliveryOrderModel.fromAssignmentJson(e))
-          .toList();
-    } catch (e) {
-      throw OrderException('No se pudo cargar el historial: $e');
-    }
+    return data == null ? null : OrderAssignmentModel.fromJson(data);
   }
 
   @override
-  Future<void> acceptOffer(String assignmentId) async {
+  Stream<List<Map<String, dynamic>>> watchAssignments(String driverId) {
+    return _client
+        .from(AppConstants.orderAssignmentsTable)
+        .stream(primaryKey: ['id'])
+        .eq('driver_id', driverId);
+  }
+
+  @override
+  Future<String> acceptOffer(String assignmentId) async {
     try {
-      await _client.rpc('driver_accept_assignment',
+      final res = await _client.rpc(AppConstants.rpcAcceptAssignment,
           params: {'p_assignment_id': assignmentId});
+      return res.toString();
     } catch (e) {
-      throw OrderException('No se pudo aceptar el pedido: ${_pgMessage(e)}');
+      throw OrderException('No se pudo aceptar el pedido: $e');
     }
   }
 
   @override
   Future<void> rejectOffer(String assignmentId, {String? reason}) async {
     try {
-      await _client.rpc('driver_reject_assignment', params: {
-        'p_assignment_id': assignmentId,
-        if (reason != null) 'p_reason': reason,
-      });
+      await _client.rpc(AppConstants.rpcRejectAssignment,
+          params: {'p_assignment_id': assignmentId, 'p_reason': reason});
     } catch (e) {
-      throw OrderException('No se pudo rechazar el pedido: ${_pgMessage(e)}');
+      throw OrderException('No se pudo rechazar el pedido: $e');
     }
   }
 
   @override
-  Future<void> advanceOrderStatus(String orderId, OrderStatus toStatus) async {
+  Future<void> advanceStatus(String orderId, String toStatus) async {
     try {
-      await _client.rpc('driver_advance_order_status', params: {
-        'p_order_id': orderId,
-        'p_to_status': toStatus.value,
-      });
+      await _client.rpc(AppConstants.rpcAdvanceOrderStatus,
+          params: {'p_order_id': orderId, 'p_to_status': toStatus});
     } catch (e) {
-      throw OrderException('No se pudo actualizar el estado: ${_pgMessage(e)}');
+      throw OrderException('No se pudo actualizar el estado: $e');
     }
   }
 
-  static String _pgMessage(Object e) =>
-      e is PostgrestException ? e.message : e.toString();
+  @override
+  Future<void> submitEvidence(
+      String orderId, String fileUrl, String evidenceType,
+      {String? note}) async {
+    final uid = _client.auth.currentUser?.id;
+    await _client.from(AppConstants.orderEvidencesTable).insert({
+      'order_id': orderId,
+      'driver_id': uid,
+      'evidence_type': evidenceType,
+      'file_url': fileUrl,
+      'note': note,
+    });
+  }
+
+  @override
+  Future<void> uploadDeliveryPhoto(String orderId, Uint8List bytes) async {
+    final uid = _client.auth.currentUser?.id;
+    final path =
+        '$uid/evidence_${orderId}_${DateTime.now().millisecondsSinceEpoch}.jpg';
+    await _client.storage.from(AppConstants.driverDocumentsBucket).uploadBinary(
+          path,
+          bytes,
+          fileOptions: const FileOptions(upsert: true, contentType: 'image/jpeg'),
+        );
+    await submitEvidence(orderId, path, 'delivery_photo');
+  }
+
+  @override
+  Future<void> recordCashCollection(String orderId, double amount) async {
+    final uid = _client.auth.currentUser?.id;
+    await _client.from(AppConstants.cashCollectionsTable).insert({
+      'order_id': orderId,
+      'driver_id': uid,
+      'amount_collected': amount,
+      'status': 'collected',
+      'collected_at': DateTime.now().toIso8601String(),
+    });
+  }
 }

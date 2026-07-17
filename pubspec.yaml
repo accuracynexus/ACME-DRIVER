@@ -24,12 +24,16 @@ dependencies:
   flutter_dotenv: ^5.1.0
 
   # ── Mapas y Geolocalización ──────────────────────────────
-  flutter_map: ^7.0.2
-  latlong2: ^0.9.1
-  geolocator: ^13.0.1
+  google_maps_flutter: ^2.6.1
+  flutter_map: ^7.0.2          # Mapa interactivo con OpenStreetMap (sin API key)
+  latlong2: ^0.9.1             # Tipos de coordenadas para flutter_map
+  geolocator: ^12.0.0
+  geocoding: ^3.0.0
   url_launcher: ^6.3.0
 
-  # ── Notificaciones locales ───────────────────────────────
+  # ── Firebase / FCM ───────────────────────────────────────
+  firebase_core: ^3.6.0
+  firebase_messaging: ^15.1.3
   flutter_local_notifications: ^17.2.2
 
   # ── HTTP / Networking ────────────────────────────────────
@@ -71,6 +75,23 @@ dev_dependencies:
   json_serializable: ^6.8.0
   custom_lint: ^0.7.3
   riverpod_lint: ^2.6.3
+  flutter_launcher_icons: ^0.13.1
+  flutter_native_splash: ^2.4.1
+
+flutter_launcher_icons:
+  android: true
+  ios: true
+  image_path: "assets/icons/icon-main.jpg"
+  min_sdk_android: 21
+
+flutter_native_splash:
+  color: "#FF6200"
+  image: assets/icons/transparent.png
+  android_12:
+    color: "#FF6200"
+    image: assets/icons/transparent.png
+  android: true
+  ios: true
 
 flutter:
   uses-material-design: true

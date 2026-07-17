@@ -1,109 +1,123 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'package:phosphor_flutter/phosphor_flutter.dart';
 import 'package:timeago/timeago.dart' as timeago;
-import '../../../../core/constants/app_colors.dart';
 import '../../../../core/router/app_router.dart';
+import '../../../../core/constants/app_colors.dart';
 import '../../../../shared/widgets/common_widgets.dart';
-import '../providers/notification_provider.dart';
+import '../../../../shared/widgets/premium_header.dart';
+import '../providers/notifications_provider.dart';
 
 class NotificationsScreen extends ConsumerWidget {
   const NotificationsScreen({super.key});
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final notificationsAsync = ref.watch(notificationsProvider);
-
+    final async = ref.watch(notificationsProvider);
     return Scaffold(
-      appBar: AppBar(
-        title: const Text('Notificaciones'),
-        actions: [
-          TextButton(
-            onPressed: () =>
-                ref.read(notificationActionsProvider).markAllRead(),
-            child: const Text('Marcar leídas'),
-          ),
-        ],
-      ),
-      body: notificationsAsync.when(
-        data: (notifications) {
-          if (notifications.isEmpty) {
-            return const EmptyState(
-              icon: Icons.notifications_none,
-              title: 'Sin notificaciones',
-              subtitle: 'Aquí verás las ofertas de pedidos y avisos.',
-            );
-          }
-          return RefreshIndicator(
-            onRefresh: () async => ref.invalidate(notificationsProvider),
-            child: ListView.separated(
-              padding: const EdgeInsets.all(16),
-              itemCount: notifications.length,
-              separatorBuilder: (_, __) => const SizedBox(height: 8),
-              itemBuilder: (context, index) {
-                final n = notifications[index];
-                return _NotificationTile(notification: n);
-              },
-            ),
-          );
-        },
-        loading: () => const Center(child: CircularProgressIndicator()),
-        error: (e, s) => Center(child: Text('Error: $e')),
-      ),
-    );
-  }
-}
-
-class _NotificationTile extends ConsumerWidget {
-  final AppNotification notification;
-
-  const _NotificationTile({required this.notification});
-
-  IconData get _icon {
-    switch (notification.type) {
-      case 'order_offer':
-        return Icons.delivery_dining;
-      case 'conversation_message':
-        return Icons.chat_bubble_outline;
-      default:
-        return Icons.notifications_outlined;
-    }
-  }
-
-  @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    return ListTile(
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-      tileColor: notification.isRead
-          ? AppColors.surface
-          : AppColors.primary.withOpacity(0.08),
-      leading: Icon(_icon,
-          color: notification.isRead ? AppColors.textSecondary : AppColors.primary),
-      title: Text(
-        notification.title,
-        style: TextStyle(
-          fontWeight:
-              notification.isRead ? FontWeight.w500 : FontWeight.w700,
-          fontSize: 14,
-        ),
-      ),
-      subtitle: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
+      body: Column(
         children: [
-          Text(notification.body, style: const TextStyle(fontSize: 13)),
-          const SizedBox(height: 4),
-          Text(
-            timeago.format(notification.createdAt, locale: 'es'),
-            style: const TextStyle(fontSize: 11, color: AppColors.textHint),
+          PremiumHeader(
+            title: 'Notificaciones',
+            subtitle: 'Avisos de tus pedidos',
+            showBack: true,
+            onBack: () =>
+                context.canPop() ? context.pop() : context.go(AppRoutes.home),
+          ),
+          Expanded(
+            child: async.when(
+              data: (items) {
+                if (items.isEmpty) {
+                  return const EmptyState(
+                    icon: PhosphorIconsRegular.bellSlash,
+                    title: 'Sin notificaciones',
+                    subtitle: 'Aquí verás los avisos de tus pedidos.',
+                  );
+                }
+                return RefreshIndicator(
+                  color: AppColors.primary,
+                  onRefresh: () async => ref.invalidate(notificationsProvider),
+                  child: ListView.separated(
+                    padding: EdgeInsets.fromLTRB(
+                        16, 18, 16, 24 + MediaQuery.of(context).padding.bottom + 96),
+                    itemCount: items.length,
+                    separatorBuilder: (_, __) => const SizedBox(height: 10),
+                    itemBuilder: (_, i) {
+                      final n = items[i];
+                      return Container(
+                        padding: const EdgeInsets.all(14),
+                        decoration: BoxDecoration(
+                          color: n.isRead
+                              ? AppColors.surface
+                              : AppColors.primary.withValues(alpha: 0.05),
+                          borderRadius: BorderRadius.circular(16),
+                          border: Border.all(
+                              color: n.isRead
+                                  ? AppColors.border
+                                  : AppColors.primary.withValues(alpha: 0.25)),
+                        ),
+                        child: Row(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Container(
+                              width: 44,
+                              height: 44,
+                              decoration: BoxDecoration(
+                                color: AppColors.primary.withValues(alpha: 0.1),
+                                borderRadius: BorderRadius.circular(12),
+                              ),
+                              child: const Icon(PhosphorIconsFill.package,
+                                  color: AppColors.primary, size: 22),
+                            ),
+                            const SizedBox(width: 12),
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(n.title ?? 'Notificación',
+                                      style: const TextStyle(
+                                          fontWeight: FontWeight.w700,
+                                          fontSize: 14)),
+                                  if (n.body != null) ...[
+                                    const SizedBox(height: 2),
+                                    Text(n.body!,
+                                        style: const TextStyle(
+                                            color: AppColors.textSecondary,
+                                            fontSize: 13)),
+                                  ],
+                                  const SizedBox(height: 6),
+                                  Text(
+                                      timeago.format(n.createdAt, locale: 'es'),
+                                      style: const TextStyle(
+                                          fontSize: 11,
+                                          color: AppColors.textHint)),
+                                ],
+                              ),
+                            ),
+                            if (!n.isRead)
+                              Container(
+                                width: 9,
+                                height: 9,
+                                margin: const EdgeInsets.only(top: 4, left: 6),
+                                decoration: const BoxDecoration(
+                                    color: AppColors.accent,
+                                    shape: BoxShape.circle),
+                              ),
+                          ],
+                        ),
+                      );
+                    },
+                  ),
+                );
+              },
+              loading: () => const Center(
+                  child: CircularProgressIndicator(color: AppColors.primary)),
+              error: (e, _) => Center(child: Text('Error: $e')),
+            ),
           ),
         ],
       ),
-      onTap: () {
-        ref.read(notificationActionsProvider).markRead(notification.id);
-        if (notification.type == 'order_offer') {
-          context.go(AppRoutes.availableOrders);
-        }
-      },
     );
   }
 }

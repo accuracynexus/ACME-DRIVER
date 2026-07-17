@@ -1,125 +1,6 @@
 import 'package:equatable/equatable.dart';
 
-/// Un pedido visto por el repartidor: asignación + pedido + local + entrega.
-class DeliveryOrder extends Equatable {
-  final String assignmentId;
-  final AssignmentStatus assignmentStatus;
-  final DateTime? assignedAt;
-  final DateTime? acceptedAt;
-  final DateTime? completedAt;
-
-  final String orderId;
-  final int orderCode;
-  final OrderStatus status;
-  final double subtotal;
-  final double deliveryFee;
-  final double total;
-  final String paymentStatus; // pending, paid, ...
-  final String paymentMethodCode; // cash, yape, plin, card_online, card_pos
-  final String paymentMethodName;
-  final String? specialInstructions;
-  final DateTime? placedAt;
-
-  // Local (recojo)
-  final String branchName;
-  final String? branchPhone;
-  final double branchLat;
-  final double branchLng;
-
-  // Entrega
-  final String deliveryAddress;
-  final String? deliveryReference;
-  final double deliveryLat;
-  final double deliveryLng;
-  final String recipientName;
-  final String recipientPhone;
-  final double? estimatedDistanceKm;
-  final int? estimatedTimeMin;
-
-  final List<OrderItem> items;
-
-  const DeliveryOrder({
-    required this.assignmentId,
-    required this.assignmentStatus,
-    this.assignedAt,
-    this.acceptedAt,
-    this.completedAt,
-    required this.orderId,
-    required this.orderCode,
-    required this.status,
-    required this.subtotal,
-    required this.deliveryFee,
-    required this.total,
-    this.paymentStatus = 'pending',
-    this.paymentMethodCode = '',
-    this.paymentMethodName = '',
-    this.specialInstructions,
-    this.placedAt,
-    required this.branchName,
-    this.branchPhone,
-    required this.branchLat,
-    required this.branchLng,
-    required this.deliveryAddress,
-    this.deliveryReference,
-    required this.deliveryLat,
-    required this.deliveryLng,
-    required this.recipientName,
-    required this.recipientPhone,
-    this.estimatedDistanceKm,
-    this.estimatedTimeMin,
-    this.items = const [],
-  });
-
-  String get code => '#$orderCode';
-
-  /// El repartidor debe cobrar al entregar (pago contra entrega no pagado).
-  bool get mustCollectPayment =>
-      paymentStatus != 'paid' && paymentMethodCode != 'card_online';
-
-  bool get hasCoordinates =>
-      (branchLat != 0 || branchLng != 0) && (deliveryLat != 0 || deliveryLng != 0);
-
-  @override
-  List<Object?> get props => [assignmentId, orderId, status, assignmentStatus];
-}
-
-class OrderItem extends Equatable {
-  final String name;
-  final int quantity;
-  final double unitPrice;
-  final double lineTotal;
-
-  const OrderItem({
-    required this.name,
-    required this.quantity,
-    required this.unitPrice,
-    required this.lineTotal,
-  });
-
-  @override
-  List<Object?> get props => [name, quantity, lineTotal];
-}
-
-enum AssignmentStatus { assigned, accepted, rejected, cancelled, completed }
-
-extension AssignmentStatusX on AssignmentStatus {
-  static AssignmentStatus fromString(String? v) {
-    switch (v) {
-      case 'accepted':
-        return AssignmentStatus.accepted;
-      case 'rejected':
-        return AssignmentStatus.rejected;
-      case 'cancelled':
-        return AssignmentStatus.cancelled;
-      case 'completed':
-        return AssignmentStatus.completed;
-      default:
-        return AssignmentStatus.assigned;
-    }
-  }
-}
-
-/// Estados del pedido (enum public.order_status del backend).
+/// Estados del pedido (enum order_status del backend).
 enum OrderStatus {
   pendingPayment,
   placed,
@@ -135,36 +16,7 @@ enum OrderStatus {
   failed,
 }
 
-extension OrderStatusExtension on OrderStatus {
-  String get label {
-    switch (this) {
-      case OrderStatus.pendingPayment:
-        return 'Pago pendiente';
-      case OrderStatus.placed:
-        return 'Recibido';
-      case OrderStatus.confirmed:
-        return 'Confirmado';
-      case OrderStatus.preparing:
-        return 'En preparación';
-      case OrderStatus.readyForPickup:
-        return 'Listo para recojo';
-      case OrderStatus.assigned:
-        return 'Oferta asignada';
-      case OrderStatus.driverAccepted:
-        return 'Aceptado';
-      case OrderStatus.pickedUp:
-        return 'Recogido';
-      case OrderStatus.onTheWay:
-        return 'En camino';
-      case OrderStatus.delivered:
-        return 'Entregado';
-      case OrderStatus.cancelled:
-        return 'Cancelado';
-      case OrderStatus.failed:
-        return 'Fallido';
-    }
-  }
-
+extension OrderStatusX on OrderStatus {
   String get value {
     switch (this) {
       case OrderStatus.pendingPayment:
@@ -194,15 +46,68 @@ extension OrderStatusExtension on OrderStatus {
     }
   }
 
-  static OrderStatus fromString(String? value) {
-    for (final s in OrderStatus.values) {
-      if (s.value == value) return s;
+  String get label {
+    switch (this) {
+      case OrderStatus.pendingPayment:
+        return 'Pago pendiente';
+      case OrderStatus.placed:
+        return 'Realizado';
+      case OrderStatus.confirmed:
+        return 'Confirmado';
+      case OrderStatus.preparing:
+        return 'En preparación';
+      case OrderStatus.readyForPickup:
+        return 'Listo para recoger';
+      case OrderStatus.assigned:
+        return 'Asignado';
+      case OrderStatus.driverAccepted:
+        return 'Aceptado';
+      case OrderStatus.pickedUp:
+        return 'Recogido';
+      case OrderStatus.onTheWay:
+        return 'En camino';
+      case OrderStatus.delivered:
+        return 'Entregado';
+      case OrderStatus.cancelled:
+        return 'Cancelado';
+      case OrderStatus.failed:
+        return 'Fallido';
     }
-    return OrderStatus.placed;
   }
 
-  /// Siguiente estado que el repartidor puede reportar.
-  OrderStatus? get next {
+  static OrderStatus fromString(String? v) {
+    switch (v) {
+      case 'pending_payment':
+        return OrderStatus.pendingPayment;
+      case 'placed':
+        return OrderStatus.placed;
+      case 'confirmed':
+        return OrderStatus.confirmed;
+      case 'preparing':
+        return OrderStatus.preparing;
+      case 'ready_for_pickup':
+        return OrderStatus.readyForPickup;
+      case 'assigned':
+        return OrderStatus.assigned;
+      case 'driver_accepted':
+        return OrderStatus.driverAccepted;
+      case 'picked_up':
+        return OrderStatus.pickedUp;
+      case 'on_the_way':
+        return OrderStatus.onTheWay;
+      case 'delivered':
+        return OrderStatus.delivered;
+      case 'cancelled':
+        return OrderStatus.cancelled;
+      case 'failed':
+        return OrderStatus.failed;
+      default:
+        return OrderStatus.placed;
+    }
+  }
+
+  /// Siguiente estado que el repartidor puede accionar, o null si no aplica.
+  OrderStatus? get nextForDriver {
     switch (this) {
       case OrderStatus.driverAccepted:
         return OrderStatus.pickedUp;
@@ -215,11 +120,10 @@ extension OrderStatusExtension on OrderStatus {
     }
   }
 
-  /// Etiqueta del botón para avanzar al siguiente estado.
-  String? get nextActionLabel {
+  String? get driverActionLabel {
     switch (this) {
       case OrderStatus.driverAccepted:
-        return 'Ya recogí el pedido';
+        return 'Marcar como recogido';
       case OrderStatus.pickedUp:
         return 'Iniciar entrega';
       case OrderStatus.onTheWay:
@@ -233,4 +137,129 @@ extension OrderStatusExtension on OrderStatus {
       this == OrderStatus.driverAccepted ||
       this == OrderStatus.pickedUp ||
       this == OrderStatus.onTheWay;
+
+  bool get isFinished =>
+      this == OrderStatus.delivered ||
+      this == OrderStatus.cancelled ||
+      this == OrderStatus.failed;
+}
+
+class Order extends Equatable {
+  final String id;
+  final int orderCode;
+  final OrderStatus status;
+  final String? paymentStatus;
+  final String paymentMethodCode; // cash, yape, plin, card_online, card_pos
+  final String paymentMethodName; // "Efectivo", "Yape", "Plin", ...
+  final String fulfillmentType;
+
+  // Recojo (merchant_branches)
+  final String? branchId;
+  final String branchName;
+  final String? branchPhone;
+  final String? branchAddress;
+  final String? branchReference;
+  final double? branchLat;
+  final double? branchLng;
+
+  // Entrega (order_delivery_details)
+  final String deliveryAddress;
+  final String? deliveryReference;
+  final String? deliveryDistrict;
+  final double? deliveryLat;
+  final double? deliveryLng;
+  final String? recipientName;
+  final String? recipientPhone;
+  final double? estimatedDistanceKm;
+  final int? estimatedTimeMin;
+
+  // Dinero
+  final double subtotal;
+  final double deliveryFee;
+  final double tipAmount;
+  final double total;
+  final double? cashChangeFor;
+  final String currency;
+
+  final String? specialInstructions;
+
+  // Tiempos
+  final DateTime? placedAt;
+  final DateTime? acceptedAt;
+  final DateTime? pickedUpAt;
+  final DateTime? deliveredAt;
+  final DateTime? cancelledAt;
+  final DateTime createdAt;
+
+  const Order({
+    required this.id,
+    required this.orderCode,
+    required this.status,
+    this.paymentStatus,
+    this.paymentMethodCode = '',
+    this.paymentMethodName = '',
+    required this.fulfillmentType,
+    this.branchId,
+    required this.branchName,
+    this.branchPhone,
+    this.branchAddress,
+    this.branchReference,
+    this.branchLat,
+    this.branchLng,
+    required this.deliveryAddress,
+    this.deliveryReference,
+    this.deliveryDistrict,
+    this.deliveryLat,
+    this.deliveryLng,
+    this.recipientName,
+    this.recipientPhone,
+    this.estimatedDistanceKm,
+    this.estimatedTimeMin,
+    required this.subtotal,
+    required this.deliveryFee,
+    required this.tipAmount,
+    required this.total,
+    this.cashChangeFor,
+    required this.currency,
+    this.specialInstructions,
+    this.placedAt,
+    this.acceptedAt,
+    this.pickedUpAt,
+    this.deliveredAt,
+    this.cancelledAt,
+    required this.createdAt,
+  });
+
+  /// Ganancia del repartidor por este pedido (delivery fee + propina).
+  double get driverEarning => deliveryFee + tipAmount;
+
+  /// El repartidor debe cobrarle al cliente al entregar (efectivo, Yape, Plin,
+  /// o tarjeta en el POS). No cobra si ya se pagó online o el pago está saldado.
+  bool get mustCollectPayment =>
+      paymentStatus != 'paid' && paymentMethodCode != 'card_online';
+
+  /// Cobro específicamente en efectivo (para el registro de cash_collections).
+  bool get isCashOnDelivery => mustCollectPayment && paymentMethodCode == 'cash';
+
+  /// Nombre legible del método de pago para mostrar al repartidor.
+  String get paymentMethodLabel {
+    if (paymentMethodName.isNotEmpty) return paymentMethodName;
+    switch (paymentMethodCode) {
+      case 'cash':
+        return 'Efectivo';
+      case 'yape':
+        return 'Yape';
+      case 'plin':
+        return 'Plin';
+      case 'card_pos':
+        return 'Tarjeta (POS)';
+      case 'card_online':
+        return 'Tarjeta online';
+      default:
+        return 'Efectivo';
+    }
+  }
+
+  @override
+  List<Object?> get props => [id, status];
 }

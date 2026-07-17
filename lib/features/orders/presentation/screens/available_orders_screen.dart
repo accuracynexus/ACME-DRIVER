@@ -1,202 +1,165 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
-import 'package:timeago/timeago.dart' as timeago;
+import 'package:phosphor_flutter/phosphor_flutter.dart';
 import '../../../../core/constants/app_colors.dart';
 import '../../../../core/extensions/extensions.dart';
 import '../../../../core/router/app_router.dart';
 import '../../../../shared/widgets/common_widgets.dart';
+import '../../../../shared/widgets/premium_header.dart';
 import '../../../auth/presentation/providers/auth_provider.dart';
 import '../../domain/entities/order.dart';
+import '../order_status_ui.dart';
 import '../providers/order_provider.dart';
+import '../widgets/offer_card.dart';
 
-class AvailableOrdersScreen extends ConsumerWidget {
+class AvailableOrdersScreen extends ConsumerStatefulWidget {
   const AvailableOrdersScreen({super.key});
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final offersAsync = ref.watch(offersProvider);
-    final driver = ref.watch(currentDriverProvider).value;
-
-    return Scaffold(
-      appBar: AppBar(title: const Text('Ofertas de Pedidos')),
-      body: offersAsync.when(
-        data: (offers) {
-          if (offers.isEmpty) {
-            final offline = driver != null && !driver.isOnline;
-            return EmptyState(
-              icon: offline ? Icons.wifi_off : Icons.inbox_outlined,
-              title: offline ? 'Estás desconectado' : 'No hay ofertas',
-              subtitle: offline
-                  ? 'Conéctate desde Inicio para recibir pedidos.'
-                  : 'Cuando te asignen un pedido aparecerá aquí.',
-            );
-          }
-
-          return RefreshIndicator(
-            onRefresh: () async => ref.invalidate(offersProvider),
-            child: ListView.separated(
-              padding: const EdgeInsets.all(16),
-              itemCount: offers.length,
-              separatorBuilder: (_, __) => const SizedBox(height: 16),
-              itemBuilder: (context, index) =>
-                  _OfferCard(offer: offers[index]),
-            ),
-          );
-        },
-        loading: () => const Center(child: CircularProgressIndicator()),
-        error: (e, s) => Center(
-          child: Padding(
-            padding: const EdgeInsets.all(24),
-            child: Text('Error: $e', textAlign: TextAlign.center),
-          ),
-        ),
-      ),
-    );
-  }
+  ConsumerState<AvailableOrdersScreen> createState() =>
+      _AvailableOrdersScreenState();
 }
 
-class _OfferCard extends ConsumerStatefulWidget {
-  final DeliveryOrder offer;
-
-  const _OfferCard({required this.offer});
-
-  @override
-  ConsumerState<_OfferCard> createState() => _OfferCardState();
-}
-
-class _OfferCardState extends ConsumerState<_OfferCard> {
-  bool _busy = false;
+class _AvailableOrdersScreenState extends ConsumerState<AvailableOrdersScreen> {
+  bool _processing = false;
 
   Future<void> _accept() async {
-    setState(() => _busy = true);
+    setState(() => _processing = true);
     try {
-      await ref.read(activeOrderProvider.notifier).acceptOffer(widget.offer);
-      if (mounted) {
-        context.showSnackBar('Pedido aceptado');
-        context.go(AppRoutes.activeOrder);
-      }
+      await ref.read(pendingOfferProvider.notifier).accept();
+      await ref.read(activeOrderProvider.notifier).refresh();
+      await ref.read(currentDriverProvider.notifier).refresh();
+      if (mounted) context.go(AppRoutes.activeOrder);
     } catch (e) {
-      if (mounted) context.showSnackBar('$e', isError: true);
+      if (mounted) context.showSnackBar(e.toString(), isError: true);
     } finally {
-      if (mounted) setState(() => _busy = false);
+      if (mounted) setState(() => _processing = false);
     }
   }
 
   Future<void> _reject() async {
-    setState(() => _busy = true);
+    setState(() => _processing = true);
     try {
-      await ref
-          .read(activeOrderProvider.notifier)
-          .rejectOffer(widget.offer, reason: 'Rechazado por el repartidor');
-      if (mounted) context.showSnackBar('Oferta rechazada');
+      await ref.read(pendingOfferProvider.notifier).reject();
     } catch (e) {
-      if (mounted) context.showSnackBar('$e', isError: true);
+      if (mounted) context.showSnackBar(e.toString(), isError: true);
     } finally {
-      if (mounted) setState(() => _busy = false);
+      if (mounted) setState(() => _processing = false);
     }
   }
 
   @override
   Widget build(BuildContext context) {
-    final offer = widget.offer;
-    return Card(
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+    final driver = ref.watch(currentDriverProvider).value;
+    final offer = ref.watch(pendingOfferProvider).value;
+    final active = ref.watch(activeOrderProvider).value;
+    final online = driver?.isOnline == true;
+
+    return Scaffold(
+      body: Column(
+        children: [
+          const PremiumHeader(
+              title: 'Mis pedidos', subtitle: 'Ofertas y entrega en curso'),
+          Expanded(
+            child: ListView(
+              padding: const EdgeInsets.fromLTRB(16, 20, 16, 110),
               children: [
-                Text(
-                  offer.code,
-                  style: const TextStyle(
-                      fontWeight: FontWeight.w700, fontSize: 16),
-                ),
-                Text(
-                  offer.deliveryFee.toCurrency,
-                  style: const TextStyle(
-                    fontWeight: FontWeight.w700,
-                    fontSize: 16,
-                    color: AppColors.primary,
+                if (offer != null)
+                  OfferCard(
+                    offer: offer,
+                    processing: _processing,
+                    onAccept: _accept,
+                    onReject: _reject,
                   ),
-                ),
-              ],
-            ),
-            if (offer.assignedAt != null)
-              Text(
-                'Ofertado ${timeago.format(offer.assignedAt!, locale: 'es')}',
-                style:
-                    const TextStyle(fontSize: 11, color: AppColors.textHint),
-              ),
-            const SizedBox(height: 16),
-            InfoTile(
-              icon: Icons.store,
-              title: 'Recojo',
-              value: offer.branchName,
-            ),
-            const SizedBox(height: 8),
-            InfoTile(
-              icon: Icons.flag,
-              title: 'Entrega',
-              value: offer.deliveryAddress,
-              iconColor: AppColors.accent,
-            ),
-            if (offer.estimatedDistanceKm != null) ...[
-              const SizedBox(height: 8),
-              InfoTile(
-                icon: Icons.route,
-                title: 'Distancia estimada',
-                value:
-                    '${offer.estimatedDistanceKm!.toStringAsFixed(1)} km'
-                    '${offer.estimatedTimeMin != null ? ' · ${offer.estimatedTimeMin} min' : ''}',
-                iconColor: AppColors.info,
-              ),
-            ],
-            const SizedBox(height: 8),
-            InfoTile(
-              icon: offer.mustCollectPayment
-                  ? Icons.payments_outlined
-                  : Icons.check_circle_outline,
-              title: 'Pago',
-              value: offer.mustCollectPayment
-                  ? 'Cobrar ${offer.total.toCurrency}'
-                      '${offer.paymentMethodName.isNotEmpty ? ' · ${offer.paymentMethodName}' : ''}'
-                  : 'Pagado online — no cobrar',
-              iconColor: offer.mustCollectPayment
-                  ? AppColors.warning
-                  : AppColors.success,
-            ),
-            const SizedBox(height: 16),
-            Row(
-              children: [
-                Expanded(
-                  child: OutlinedButton(
-                    onPressed: _busy ? null : _reject,
-                    style: OutlinedButton.styleFrom(
-                      foregroundColor: AppColors.error,
-                      side: const BorderSide(color: AppColors.error),
+                if (active != null) ...[
+                  if (offer != null) const SizedBox(height: 16),
+                  _ActiveTile(
+                    code: active.orderCode,
+                    status: active.status.label,
+                    icon: active.status.icon,
+                    onTap: () => context.go(AppRoutes.activeOrder),
+                  ),
+                ],
+                if (offer == null && active == null)
+                  Padding(
+                    padding: const EdgeInsets.only(top: 60),
+                    child: EmptyState(
+                      icon: online
+                          ? PhosphorIconsRegular.hourglassMedium
+                          : PhosphorIconsBold.power,
+                      title: online
+                          ? 'Esperando pedidos'
+                          : 'Estás desconectado',
+                      subtitle: online
+                          ? 'Los pedidos se asignan automáticamente según tu cercanía y carga. Te avisaremos cuando llegue uno.'
+                          : 'Conéctate desde el inicio para empezar a recibir pedidos.',
                     ),
-                    child: const Text('Rechazar'),
                   ),
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  flex: 2,
-                  child: ElevatedButton(
-                    onPressed: _busy ? null : _accept,
-                    child: _busy
-                        ? const SizedBox(
-                            width: 18,
-                            height: 18,
-                            child: CircularProgressIndicator(strokeWidth: 2),
-                          )
-                        : const Text('Aceptar Pedido'),
-                  ),
-                ),
               ],
             ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _ActiveTile extends StatelessWidget {
+  final int code;
+  final String status;
+  final IconData icon;
+  final VoidCallback onTap;
+  const _ActiveTile(
+      {required this.code,
+      required this.status,
+      required this.icon,
+      required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(18),
+      child: Container(
+        padding: const EdgeInsets.all(16),
+        decoration: BoxDecoration(
+          gradient: AppColors.primaryGradient,
+          borderRadius: BorderRadius.circular(18),
+          boxShadow: const [
+            BoxShadow(
+                color: AppColors.shadow, blurRadius: 16, offset: Offset(0, 6)),
+          ],
+        ),
+        child: Row(
+          children: [
+            Container(
+              width: 44,
+              height: 44,
+              decoration: BoxDecoration(
+                color: Colors.white.withValues(alpha: 0.2),
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: Icon(icon, color: Colors.white),
+            ),
+            const SizedBox(width: 14),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text('Pedido activo #$code',
+                      style: const TextStyle(
+                          color: Colors.white,
+                          fontWeight: FontWeight.w800,
+                          fontSize: 15)),
+                  Text(status,
+                      style: TextStyle(
+                          color: Colors.white.withValues(alpha: 0.9),
+                          fontSize: 13)),
+                ],
+              ),
+            ),
+            const Icon(PhosphorIconsBold.caretRight, color: Colors.white),
           ],
         ),
       ),

@@ -1,61 +1,36 @@
 import 'dart:async';
-
-import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:supabase_flutter/supabase_flutter.dart';
 import '../../data/datasources/order_model.dart';
+import '../../data/datasources/order_assignment_model.dart';
 import '../../data/datasources/order_remote_datasource.dart';
 import '../../domain/entities/order.dart';
-import '../../../../core/constants/app_constants.dart';
-import '../../../../core/services/location_service.dart';
 import '../../../../core/services/notification_service.dart';
 import '../../../../shared/providers/supabase_provider.dart';
 import '../../../auth/presentation/providers/auth_provider.dart';
 
-// ── Data source ─────────────────────────────────────────────
+// ── Data source ──────────────────────────────────────────────
 final orderDataSourceProvider = Provider<OrderRemoteDataSource>((ref) {
   return OrderRemoteDataSourceImpl(ref.watch(supabaseClientProvider));
 });
 
-// ── Ofertas pendientes ──────────────────────────────────────
-final offersProvider = FutureProvider<List<DeliveryOrderModel>>((ref) async {
-  final driverId = ref.watch(currentDriverProvider).value?.id ?? '';
-  if (driverId.isEmpty) return [];
-  return ref.watch(orderDataSourceProvider).getOffers(driverId);
+final _driverIdProvider = Provider<String>((ref) {
+  return ref.watch(currentDriverProvider).value?.userId ?? '';
 });
 
-// ── Historial ───────────────────────────────────────────────
-final orderHistoryProvider =
-    FutureProvider<List<DeliveryOrderModel>>((ref) async {
-  final driverId = ref.watch(currentDriverProvider).value?.id ?? '';
-  if (driverId.isEmpty) return [];
-  return ref.watch(orderDataSourceProvider).getHistory(driverId);
-});
-
-// ── Entrega activa ──────────────────────────────────────────
-final activeOrderProvider = StateNotifierProvider<ActiveOrderNotifier,
-    AsyncValue<DeliveryOrderModel?>>((ref) {
-  final driverId = ref.watch(currentDriverProvider).value?.id ?? '';
+// ── Pedido activo ────────────────────────────────────────────
+final activeOrderProvider =
+    StateNotifierProvider<ActiveOrderNotifier, AsyncValue<OrderModel?>>((ref) {
   return ActiveOrderNotifier(
     ref.watch(orderDataSourceProvider),
-    ref.watch(locationServiceProvider),
-    driverId,
-    onChanged: () {
-      ref.invalidate(offersProvider);
-      ref.invalidate(orderHistoryProvider);
-    },
+    ref.watch(_driverIdProvider),
   );
 });
 
-class ActiveOrderNotifier
-    extends StateNotifier<AsyncValue<DeliveryOrderModel?>> {
-  final OrderRemoteDataSource _dataSource;
-  final LocationService _locationService;
+class ActiveOrderNotifier extends StateNotifier<AsyncValue<OrderModel?>> {
+  final OrderRemoteDataSource _ds;
   final String _driverId;
-  final VoidCallback? onChanged;
 
-  ActiveOrderNotifier(this._dataSource, this._locationService, this._driverId,
-      {this.onChanged})
+  ActiveOrderNotifier(this._ds, this._driverId)
       : super(const AsyncValue.loading()) {
     refresh();
   }
@@ -65,123 +40,125 @@ class ActiveOrderNotifier
       state = const AsyncValue.data(null);
       return;
     }
-    final result =
-        await AsyncValue.guard(() => _dataSource.getActiveDelivery(_driverId));
-    if (!mounted) return;
-    state = result;
-    _locationService.currentOrderId = result.value?.orderId;
+    state = await AsyncValue.guard(() => _ds.getActiveOrder(_driverId));
   }
 
-  /// Acepta una oferta y la convierte en la entrega activa.
-  Future<void> acceptOffer(DeliveryOrder offer) async {
-    await _dataSource.acceptOffer(offer.assignmentId);
-    _locationService.start(); // asegura el envío de ubicación durante la entrega
+  Future<void> advance() async {
+    final order = state.value;
+    if (order == null) return;
+    final next = order.status.nextForDriver;
+    if (next == null) return;
+    await _ds.advanceStatus(order.id, next.value);
     await refresh();
-    onChanged?.call();
   }
 
-  Future<void> rejectOffer(DeliveryOrder offer, {String? reason}) async {
-    await _dataSource.rejectOffer(offer.assignmentId, reason: reason);
-    onChanged?.call();
+  Future<void> submitDeliveryEvidence(String fileUrl, {String? note}) async {
+    final order = state.value;
+    if (order == null) return;
+    await _ds.submitEvidence(order.id, fileUrl, 'delivery_photo', note: note);
   }
 
-  /// Avanza el pedido activo al siguiente estado del flujo.
-  Future<void> advanceStatus() async {
-    final current = state.value;
-    final next = current?.status.next;
-    if (current == null || next == null) return;
-
-    await _dataSource.advanceOrderStatus(current.orderId, next);
-    await refresh();
-    onChanged?.call();
+  Future<void> collectCash(double amount) async {
+    final order = state.value;
+    if (order == null) return;
+    await _ds.recordCashCollection(order.id, amount);
   }
 }
 
-// ── Sincronización: polling + realtime + aviso de nuevas ofertas ──
-final orderSyncProvider = Provider<OrderSync>((ref) {
-  final sync = OrderSync(ref);
-  ref.onDispose(sync.stop);
-  return sync;
+// ── Historial ────────────────────────────────────────────────
+final orderHistoryProvider = FutureProvider<List<OrderModel>>((ref) async {
+  final driverId = ref.watch(_driverIdProvider);
+  if (driverId.isEmpty) return [];
+  return ref.watch(orderDataSourceProvider).getOrderHistory(driverId);
 });
 
-/// Refresca ofertas/pedido activo periódicamente y por realtime (si el
-/// proyecto lo tiene habilitado). Lanza una notificación local cuando
-/// aparece una oferta nueva.
-class OrderSync {
-  final Ref _ref;
-  Timer? _timer;
-  RealtimeChannel? _channel;
-  Set<String> _knownOfferIds = {};
-  bool _primed = false;
+// ── Oferta pendiente (realtime) ──────────────────────────────
+final pendingOfferProvider =
+    StateNotifierProvider<OfferNotifier, AsyncValue<OrderAssignmentModel?>>(
+        (ref) {
+  return OfferNotifier(
+    ref.watch(orderDataSourceProvider),
+    ref.watch(_driverIdProvider),
+    ref.watch(notificationServiceProvider),
+  );
+});
 
-  OrderSync(this._ref);
+class OfferNotifier
+    extends StateNotifier<AsyncValue<OrderAssignmentModel?>> {
+  final OrderRemoteDataSource _ds;
+  final String _driverId;
+  final NotificationService _notifications;
+  StreamSubscription? _sub;
 
-  void start() {
-    if (_timer != null) return;
-    _timer = Timer.periodic(
-      const Duration(seconds: AppConstants.ordersPollInterval),
-      (_) => _tick(),
-    );
-    _subscribeRealtime();
-    _tick();
+  /// Id de la última oferta notificada, para no repetir el aviso al refrescar.
+  String? _lastNotifiedOfferId;
+
+  OfferNotifier(this._ds, this._driverId, this._notifications)
+      : super(const AsyncValue.loading()) {
+    // Inicializa el canal y pide permiso de notificaciones al arrancar,
+    // así el aviso a la barra funciona apenas llegue la primera oferta.
+    _notifications.initialize();
+    _start();
   }
 
-  void stop() {
-    _timer?.cancel();
-    _timer = null;
-    _channel?.unsubscribe();
-    _channel = null;
-    _primed = false;
-    _knownOfferIds = {};
-  }
-
-  void _subscribeRealtime() {
-    final driverId = _ref.read(currentDriverProvider).value?.id;
-    if (driverId == null || _channel != null) return;
-    try {
-      final client = _ref.read(supabaseClientProvider);
-      _channel = client
-          .channel('driver_assignments')
-          .onPostgresChanges(
-            event: PostgresChangeEvent.all,
-            schema: 'public',
-            table: 'order_assignments',
-            filter: PostgresChangeFilter(
-              type: PostgresChangeFilterType.eq,
-              column: 'driver_id',
-              value: driverId,
-            ),
-            callback: (_) => _tick(),
-          )
-          .subscribe();
-    } catch (e) {
-      debugPrint('OrderSync realtime: $e');
+  void _start() {
+    if (_driverId.isEmpty) {
+      state = const AsyncValue.data(null);
+      return;
     }
-  }
-
-  Future<void> _tick() async {
-    final driver = _ref.read(currentDriverProvider).value;
-    if (driver == null) return;
-
-    _ref.invalidate(offersProvider);
-    unawaited(_ref.read(activeOrderProvider.notifier).refresh());
-
-    try {
-      final offers = await _ref.read(offersProvider.future);
-      final ids = offers.map((o) => o.assignmentId).toSet();
-      if (_primed) {
-        for (final offer in offers) {
-          if (!_knownOfferIds.contains(offer.assignmentId)) {
-            unawaited(_ref
-                .read(notificationServiceProvider)
-                .showNewOffer(offer.code, offer.deliveryFee));
-          }
-        }
+    _load();
+    _sub = _ds.watchAssignments(_driverId).listen((rows) {
+      final hasOffer = rows.any((r) => r['status'] == 'assigned');
+      if (hasOffer) {
+        _load();
+      } else {
+        state = const AsyncValue.data(null);
+        _lastNotifiedOfferId = null;
       }
-      _knownOfferIds = ids;
-      _primed = true;
-    } catch (e) {
-      debugPrint('OrderSync tick: $e');
+    });
+  }
+
+  Future<void> _load() async {
+    state = await AsyncValue.guard(() => _ds.getPendingOffer(_driverId));
+    _maybeNotify(state.value);
+  }
+
+  /// Dispara la notificación a la barra del sistema cuando aparece una oferta
+  /// nueva (distinta a la ya notificada).
+  void _maybeNotify(OrderAssignmentModel? offer) {
+    if (offer == null) {
+      _lastNotifiedOfferId = null;
+      return;
     }
+    if (offer.id == _lastNotifiedOfferId) return;
+    _lastNotifiedOfferId = offer.id;
+    final order = offer.order;
+    if (order != null) {
+      _notifications.showNewOffer('#${order.orderCode}', order.driverEarning);
+    }
+  }
+
+  /// Acepta la oferta actual. Devuelve el id del pedido aceptado.
+  Future<String?> accept() async {
+    final offer = state.value;
+    if (offer == null) return null;
+    final orderId = await _ds.acceptOffer(offer.id);
+    state = const AsyncValue.data(null);
+    return orderId;
+  }
+
+  Future<void> reject({String? reason}) async {
+    final offer = state.value;
+    if (offer == null) return;
+    await _ds.rejectOffer(offer.id, reason: reason);
+    state = const AsyncValue.data(null);
+  }
+
+  void refresh() => _load();
+
+  @override
+  void dispose() {
+    _sub?.cancel();
+    super.dispose();
   }
 }

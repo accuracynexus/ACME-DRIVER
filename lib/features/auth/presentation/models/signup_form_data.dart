@@ -1,100 +1,80 @@
+import 'dart:typed_data';
 import '../../../../core/extensions/extensions.dart';
+import '../../../documents/domain/driver_document.dart';
+
+class PickedDoc {
+  final Uint8List bytes;
+  final String extension;
+  final String contentType;
+  const PickedDoc(this.bytes, this.extension, this.contentType);
+}
 
 class SignUpFormData {
-  // Step 1: Personal Info
+  // Paso 1 · Datos personales
   String fullName = '';
   String email = '';
   String phone = '';
   String password = '';
-  String identificationNumber = '';
-  String identificationType = 'cedula'; // cedula, pasaporte, licencia
+  String dni = '';
 
-  // Step 2: Vehicle Info
-  String vehicleType = 'moto'; // moto, bicicleta, auto
-  String licensePlate = '';
+  // Paso 2 · Vehículo (vehicle_types.code: bicycle/motorcycle/car/walker)
+  String vehicleTypeCode = 'motorcycle';
   String licenseNumber = '';
+  String plate = '';
+  String brand = '';
+  String model = '';
 
-  // Step 3: Banking & Address
-  String address = '';
-  String bankAccount = '';
+  // Paso 3 · Documentos (se suben tras crear la cuenta)
+  final Map<DocType, PickedDoc> documents = {};
 
-  // Step 4: Permissions & Terms
+  // Paso 4 · Permisos y términos
   bool locationEnabled = false;
   bool notificationsEnabled = false;
   bool acceptedTerms = false;
 
-  // Validation methods
-  bool isStep1Valid() {
-    if (fullName.isEmpty) return false;
-    if (!email.isValidEmail) return false;
-    if (!phone.isValidPhone) return false;
-    if (identificationNumber.isEmpty) return false;
-    if (!identificationNumber.isValidIdentificationNumber) return false;
-    if (!password.isStrongPassword) return false;
-    return true;
-  }
+  bool get isMotorized =>
+      vehicleTypeCode == 'motorcycle' || vehicleTypeCode == 'car';
+
+  /// Documentos requeridos según el tipo de vehículo.
+  List<DocType> get requiredDocs => [
+        DocType.dniFront,
+        DocType.dniBack,
+        if (isMotorized) DocType.license,
+        if (isMotorized) DocType.vehiclePhoto,
+      ];
+
+  bool isStep1Valid() =>
+      fullName.trim().isNotEmpty &&
+      email.isValidEmail &&
+      phone.isValidPhone &&
+      dni.isValidIdentificationNumber &&
+      password.isStrongPassword;
 
   bool isStep2Valid() {
-    if (vehicleType != 'bicicleta' && licensePlate.isEmpty) return false;
-    if (vehicleType != 'bicicleta' && !licensePlate.isValidLicensePlate) return false;
-    if (licenseNumber.isEmpty) return false;
-    if (!licenseNumber.isValidLicenseNumber) return false;
+    if (isMotorized) {
+      if (!plate.isValidLicensePlate) return false;
+      if (!licenseNumber.isValidLicenseNumber) return false;
+    }
     return true;
   }
 
-  bool isStep3Valid() {
-    if (!address.isValidAddress) return false;
-    if (bankAccount.isEmpty) return false;
-    if (!bankAccount.isValidIban) return false;
-    return true;
-  }
+  bool isStep3Valid() =>
+      requiredDocs.every((d) => documents.containsKey(d));
 
-  bool isStep4Valid() {
-    if (!acceptedTerms) return false;
-    if (!locationEnabled && !notificationsEnabled) return false;
-    return true;
-  }
+  bool isStep4Valid() => acceptedTerms;
 
-  Map<String, dynamic> toMetadata() {
-    return {
-      'fullName': fullName,
-      'phone': phone,
-      'identificationNumber': identificationNumber,
-      'identificationType': identificationType,
-      'vehicleType': vehicleType,
-      'licensePlate': licensePlate,
-      'licenseNumber': licenseNumber,
-      'address': address,
-      'bankAccount': bankAccount,
-      'locationEnabled': locationEnabled,
-      'notificationsEnabled': notificationsEnabled,
-    };
-  }
-
-  Map<String, dynamic> toProfileData(String userId) {
-    return {
-      'id': userId,
-      'full_name': fullName,
-      'role': 'driver',
-      'phone': phone,
-      'address': address,
-      'identification_number': identificationNumber,
-      'identification_type': identificationType,
-      'notifications_enabled': notificationsEnabled,
-      'location_enabled': locationEnabled,
-    };
-  }
-
-  Map<String, dynamic> toDriverData(String userId) {
-    return {
-      'user_id': userId,
-      'vehicle_type': vehicleType,
-      'license_plate': licensePlate,
-      'license_number': licenseNumber,
-      'bank_account': bankAccount,
-      'status': 'offline',
-      'is_active': true,
-      'is_verified': false,
-    };
-  }
+  Map<String, dynamic> toMetadata() => {
+        'fullName': fullName.trim(),
+        'phone': phone.trim(),
+        'dni': dni.trim(),
+        'vehicleTypeCode': vehicleTypeCode,
+        'licenseNumber': licenseNumber.trim().isEmpty ? null : licenseNumber.trim(),
+        'plate': plate.trim().isEmpty ? null : plate.trim().toUpperCase(),
+        'brand': brand.trim().isEmpty ? null : brand.trim(),
+        'model': model.trim().isEmpty ? null : model.trim(),
+        'color': null,
+        'birthday': null,
+        'notificationsEnabled': notificationsEnabled,
+        'locationEnabled': locationEnabled,
+      };
 }

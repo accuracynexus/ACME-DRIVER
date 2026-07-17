@@ -6,8 +6,9 @@ final notificationServiceProvider = Provider<NotificationService>((ref) {
   return NotificationService();
 });
 
-/// Notificaciones locales del dispositivo (sonido/banner) para avisar
-/// nuevas ofertas de pedido y actualizaciones aunque la app esté en segundo plano.
+/// Notificaciones locales del dispositivo (sonido/banner en la barra de
+/// notificaciones) para avisar nuevas ofertas de pedido y actualizaciones
+/// aunque la app esté en segundo plano.
 class NotificationService {
   final FlutterLocalNotificationsPlugin _plugin =
       FlutterLocalNotificationsPlugin();

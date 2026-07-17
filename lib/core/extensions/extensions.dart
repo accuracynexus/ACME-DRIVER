@@ -65,12 +65,11 @@ extension StringExtensions on String {
     return phoneRegex.hasMatch(replaceAll(RegExp(r'[\s\-\()]+'), ''));
   }
 
-  // Validate bank account (CCI peruano de 20 dígitos o IBAN)
+  // Validate IBAN format
   bool get isValidIban {
-    final cleaned = toUpperCase().replaceAll(RegExp(r'[\s\-]'), '');
-    final cciRegex = RegExp(r'^[0-9]{10,20}$');
     final ibanRegex = RegExp(r'^[A-Z]{2}[0-9]{2}[A-Z0-9]{1,30}$');
-    return cciRegex.hasMatch(cleaned) || ibanRegex.hasMatch(cleaned);
+    final cleaned = toUpperCase().replaceAll(RegExp(r'[\s\-]'), '');
+    return ibanRegex.hasMatch(cleaned);
   }
 
   // Validate license plate format

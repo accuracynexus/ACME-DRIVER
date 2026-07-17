@@ -1,15 +1,32 @@
-// Creates a test order near the test driver and dispatches it.
-// Usage: node scripts/seed-test-order.js [--no-dispatch]
+// Crea un pedido de prueba cerca del driver de prueba y lo despacha (oferta).
+// Muestra el método de pago (por defecto Yape) para verificar la UI de cobro.
+// Uso: node scripts/seed-test-order.js [codigo_metodo] [--no-dispatch]
 const { createClient } = require('@supabase/supabase-js');
 require('dotenv').config({ path: './.env' });
 
-const admin = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY);
+const admin = createClient(
+  process.env.SUPABASE_URL,
+  process.env.SUPABASE_SERVICE_ROLE_KEY,
+);
+
+const wantedMethod = (process.argv[2] && !process.argv[2].startsWith('--'))
+  ? process.argv[2]
+  : 'yape';
 
 async function main() {
   const { data: branch } = await admin.from('merchant_branches')
     .select('id,merchant_id,name,lat,lng').eq('name', 'Jugueria La Bahia de Ada').single();
   const { data: customer } = await admin.from('customers').select('user_id').limit(1).single();
-  const { data: pm } = await admin.from('payment_methods').select('id').eq('code', 'cash').single();
+
+  // Método de pago: intenta el pedido (yape) y cae a efectivo si no existe.
+  let { data: pm } = await admin.from('payment_methods')
+    .select('id,code,name').eq('code', wantedMethod).maybeSingle();
+  if (!pm) {
+    ({ data: pm } = await admin.from('payment_methods')
+      .select('id,code,name').eq('code', 'cash').single());
+  }
+  console.log('método de pago:', pm.code, '-', pm.name);
+
   const { data: product } = await admin.from('products')
     .select('id,name,base_price').eq('merchant_id', branch.merchant_id).limit(1).maybeSingle();
 
@@ -32,7 +49,7 @@ async function main() {
     special_instructions: 'Pedido de prueba ACME-DRIVER',
   }).select().single();
   if (oErr) { console.error('order insert:', oErr); return; }
-  console.log('order created:', order.id, 'code', order.order_code);
+  console.log('pedido creado:', order.id, 'code', order.order_code);
 
   if (product) {
     await admin.from('order_items').insert({
@@ -42,7 +59,6 @@ async function main() {
     });
   }
 
-  // Delivery point ~500m from the branch (Huancavelica center)
   const { error: dErr } = await admin.from('order_delivery_details').insert({
     order_id: order.id,
     address_snapshot: 'Jr. Torre Tagle 340, Huancavelica',
@@ -70,8 +86,6 @@ async function main() {
   console.log('assignments:', JSON.stringify(asg, null, 1));
   const { data: o2 } = await admin.from('orders').select('id,status,current_driver_id').eq('id', order.id).single();
   console.log('order after:', JSON.stringify(o2));
-  const { data: notifs } = await admin.from('notifications').select('user_id,type,title,body,entity_id').order('created_at', { ascending: false }).limit(3);
-  console.log('recent notifications:', JSON.stringify(notifs, null, 1));
 }
 
 main().catch(console.error);

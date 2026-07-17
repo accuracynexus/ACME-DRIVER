@@ -1,22 +1,24 @@
-import 'dart:async';
-import 'dart:math' as math;
-
 import 'package:flutter/material.dart';
-import 'package:flutter_map/flutter_map.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:geolocator/geolocator.dart';
 import 'package:go_router/go_router.dart';
 import 'package:image_picker/image_picker.dart';
-import 'package:latlong2/latlong.dart';
-import 'package:url_launcher/url_launcher.dart';
+import 'package:phosphor_flutter/phosphor_flutter.dart';
 import '../../../../core/constants/app_colors.dart';
 import '../../../../core/extensions/extensions.dart';
 import '../../../../core/router/app_router.dart';
-import '../../../../core/services/evidence_service.dart';
-import '../../../../core/services/route_service.dart';
+import '../../../../core/utils/navigation_launcher.dart';
+import '../../../../shared/widgets/app_button.dart';
 import '../../../../shared/widgets/common_widgets.dart';
+import '../../../../shared/widgets/premium_header.dart';
+import '../../../auth/presentation/providers/auth_provider.dart';
+import '../../../location/presentation/providers/location_provider.dart';
 import '../../domain/entities/order.dart';
+import '../order_status_ui.dart';
 import '../providers/order_provider.dart';
+import '../widgets/order_map.dart';
+
+/// Color de marca de Waze (cyan) para el botón de navegación.
+const Color _wazeColor = Color(0xFF33CCFF);
 
 class ActiveOrderScreen extends ConsumerStatefulWidget {
   const ActiveOrderScreen({super.key});
@@ -26,925 +28,561 @@ class ActiveOrderScreen extends ConsumerStatefulWidget {
 }
 
 class _ActiveOrderScreenState extends ConsumerState<ActiveOrderScreen> {
-  final MapController _mapController = MapController();
-  StreamSubscription<Position>? _positionSub;
-
-  LatLng? _driverPosition;
-  double _heading = 0;
-  double _speedKmh = 0;
-  RouteResult? _route;
-  LatLng? _routeTarget;
-  bool _follow = true;
-  bool _mapReady = false;
   bool _busy = false;
 
-  @override
-  void initState() {
-    super.initState();
-    _startPositionStream();
-  }
-
-  @override
-  void dispose() {
-    _positionSub?.cancel();
-    super.dispose();
-  }
-
-  Future<void> _startPositionStream() async {
-    try {
-      var permission = await Geolocator.checkPermission();
-      if (permission == LocationPermission.denied) {
-        permission = await Geolocator.requestPermission();
-      }
-      if (permission == LocationPermission.denied ||
-          permission == LocationPermission.deniedForever) {
-        return;
-      }
-
-      // Primera posición inmediata para no esperar al stream.
-      Geolocator.getCurrentPosition(
-        locationSettings:
-            const LocationSettings(accuracy: LocationAccuracy.high),
-      ).then(_onPosition).catchError((_) {});
-
-      _positionSub = Geolocator.getPositionStream(
-        locationSettings: const LocationSettings(
-          accuracy: LocationAccuracy.bestForNavigation,
-          distanceFilter: 5,
-        ),
-      ).listen(_onPosition);
-    } catch (_) {}
-  }
-
-  void _onPosition(Position pos) {
-    if (!mounted) return;
-    setState(() {
-      _driverPosition = LatLng(pos.latitude, pos.longitude);
-      if (pos.heading >= 0) _heading = pos.heading;
-      _speedKmh = pos.speed > 0 ? pos.speed * 3.6 : 0;
-    });
-
-    if (_follow && _mapReady) {
-      _mapController.move(_driverPosition!, _mapController.camera.zoom);
-    }
-    _refreshRoute();
-  }
-
-  Future<void> _refreshRoute() async {
-    final order = ref.read(activeOrderProvider).value;
-    final origin = _driverPosition;
-    if (order == null || origin == null || !order.hasCoordinates) return;
-
-    final target = _targetFor(order);
-    final result =
-        await ref.read(routeServiceProvider).getRoute(origin, target);
-    if (mounted && result != null) {
-      setState(() {
-        _route = result;
-        _routeTarget = target;
-      });
-    }
-  }
-
-  LatLng _targetFor(DeliveryOrder order) {
-    final pickedUp = order.status == OrderStatus.pickedUp ||
-        order.status == OrderStatus.onTheWay;
-    return pickedUp
-        ? LatLng(order.deliveryLat, order.deliveryLng)
-        : LatLng(order.branchLat, order.branchLng);
-  }
-
-  Future<void> _advance(DeliveryOrder order) async {
-    final next = order.status.next;
+  Future<void> _advance(Order order) async {
+    final next = order.status.nextForDriver;
     if (next == null) return;
 
-    // Entrega final: confirmar y ofrecer foto de evidencia.
-    XFile? evidencePhoto;
+    // Al confirmar la entrega: pedir evidencia y cobro si es contra entrega.
     if (next == OrderStatus.delivered) {
-      final choice = await showDialog<String>(
-        context: context,
-        builder: (ctx) => AlertDialog(
-          title: const Text('Confirmar entrega'),
-          content: Text(
-              '¿Entregaste el pedido ${order.code} a ${order.recipientName}?\n\n'
-              'Puedes tomar una foto como evidencia de la entrega.'),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(ctx),
-              child: const Text('Aún no'),
-            ),
-            TextButton(
-              onPressed: () => Navigator.pop(ctx, 'no_photo'),
-              child: const Text('Sin foto'),
-            ),
-            ElevatedButton.icon(
-              onPressed: () => Navigator.pop(ctx, 'photo'),
-              icon: const Icon(Icons.camera_alt, size: 18),
-              label: const Text('Foto y entregar'),
-            ),
-          ],
-        ),
-      );
-      if (choice == null) return;
-
-      if (choice == 'photo') {
-        evidencePhoto = await ImagePicker().pickImage(
-          source: ImageSource.camera,
-          imageQuality: 70,
-          maxWidth: 1600,
-        );
-        if (evidencePhoto == null) return; // canceló la cámara
-      }
+      final confirmed = await _deliveryFlow(order);
+      if (!confirmed) return;
     }
 
     setState(() => _busy = true);
     try {
-      if (evidencePhoto != null) {
-        await ref.read(evidenceServiceProvider).uploadDeliveryPhoto(
-              orderId: order.orderId,
-              image: evidencePhoto,
-            );
-      }
-      await ref.read(activeOrderProvider.notifier).advanceStatus();
-      ref.read(routeServiceProvider).clear();
-      _route = null;
-      if (mounted && next == OrderStatus.delivered) {
-        context.showSnackBar(evidencePhoto != null
-            ? '¡Entrega completada con evidencia! 🎉'
-            : '¡Entrega completada! 🎉');
+      await ref.read(activeOrderProvider.notifier).advance();
+      await ref.read(currentDriverProvider.notifier).refresh();
+      if (next == OrderStatus.delivered && mounted) {
+        context.showSnackBar('¡Pedido entregado!');
       }
     } catch (e) {
-      if (mounted) context.showSnackBar('$e', isError: true);
+      if (mounted) context.showSnackBar(e.toString(), isError: true);
     } finally {
       if (mounted) setState(() => _busy = false);
     }
   }
 
-  Future<void> _launch(Uri uri) async {
-    if (!await launchUrl(uri, mode: LaunchMode.externalApplication)) {
-      if (mounted) {
-        context.showSnackBar('No se pudo abrir la aplicación', isError: true);
-      }
-    }
-  }
-
-  void _fitAll(DeliveryOrder order) {
-    final points = <LatLng>[
-      LatLng(order.branchLat, order.branchLng),
-      LatLng(order.deliveryLat, order.deliveryLng),
-      if (_driverPosition != null) _driverPosition!,
-    ];
-    setState(() => _follow = false);
-    _mapController.fitCamera(CameraFit.bounds(
-      bounds: LatLngBounds.fromPoints(points),
-      padding: const EdgeInsets.fromLTRB(50, 100, 50, 260),
-    ));
-  }
-
-  void _recenter() {
-    if (_driverPosition == null) return;
-    setState(() => _follow = true);
-    _mapController.move(_driverPosition!, 17);
+  /// Captura foto de evidencia (opcional) y cobro en efectivo (si aplica).
+  Future<bool> _deliveryFlow(Order order) async {
+    return await showModalBottomSheet<bool>(
+          context: context,
+          isScrollControlled: true,
+          useRootNavigator: true,
+          backgroundColor: AppColors.surface,
+          shape: const RoundedRectangleBorder(
+            borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
+          ),
+          builder: (_) => _DeliverySheet(order: order),
+        ) ??
+        false;
   }
 
   @override
   Widget build(BuildContext context) {
-    final activeOrderAsync = ref.watch(activeOrderProvider);
+    final async = ref.watch(activeOrderProvider);
+    final driverPos = ref.watch(driverPositionProvider).value;
 
     return Scaffold(
-      body: activeOrderAsync.when(
+      body: Column(
+        children: [
+          const PremiumHeader(
+              title: 'Pedido activo', subtitle: 'Sigue los pasos de la entrega'),
+          Expanded(
+            child: async.when(
         data: (order) {
           if (order == null) {
-            return SafeArea(
-              child: Column(
-                children: [
-                  AppBar(title: const Text('Pedido Activo')),
-                  const Expanded(
-                    child: EmptyState(
-                      icon: Icons.motorcycle_outlined,
-                      title: 'Sin pedido activo',
-                      subtitle: 'Acepta un pedido disponible para comenzar.',
-                    ),
+            return const EmptyState(
+              icon: PhosphorIconsRegular.motorcycle,
+              title: 'Sin pedido activo',
+              subtitle: 'Cuando aceptes una oferta aparecerá aquí.',
+            );
+          }
+          return RefreshIndicator(
+            color: AppColors.primary,
+            onRefresh: () => ref.read(activeOrderProvider.notifier).refresh(),
+            child: ListView(
+              padding: const EdgeInsets.fromLTRB(16, 16, 16, 110),
+              children: [
+                _statusStepper(order.status),
+                const SizedBox(height: 16),
+                Builder(builder: (_) {
+                  // Antes de recoger, se navega al local; luego, al cliente.
+                  final goToClient = order.status == OrderStatus.pickedUp ||
+                      order.status == OrderStatus.onTheWay ||
+                      order.status == OrderStatus.delivered;
+                  return OrderMap(
+                    branchLat: order.branchLat,
+                    branchLng: order.branchLng,
+                    clientLat: order.deliveryLat,
+                    clientLng: order.deliveryLng,
+                    driverLat: driverPos?.latitude,
+                    driverLng: driverPos?.longitude,
+                    navLat: goToClient ? order.deliveryLat : order.branchLat,
+                    navLng: goToClient ? order.deliveryLng : order.branchLng,
+                    navLabel: goToClient
+                        ? (order.recipientName ?? 'Cliente')
+                        : order.branchName,
+                  );
+                }),
+                const SizedBox(height: 16),
+                _orderHeader(order),
+                const SizedBox(height: 16),
+                _locationCard(
+                  title: 'Recoger en',
+                  name: order.branchName,
+                  address: order.branchAddress ?? 'Dirección no disponible',
+                  reference: order.branchReference,
+                  phone: order.branchPhone,
+                  lat: order.branchLat,
+                  lng: order.branchLng,
+                  icon: PhosphorIconsRegular.storefront,
+                  color: AppColors.primary,
+                ),
+                const SizedBox(height: 12),
+                _locationCard(
+                  title: 'Entregar a',
+                  name: order.recipientName ?? 'Cliente',
+                  address: order.deliveryAddress,
+                  reference: order.deliveryReference,
+                  phone: order.recipientPhone,
+                  lat: order.deliveryLat,
+                  lng: order.deliveryLng,
+                  icon: PhosphorIconsFill.mapPin,
+                  color: AppColors.accent,
+                ),
+                const SizedBox(height: 12),
+                AppButton(
+                  label: 'Chatear con el cliente',
+                  icon: PhosphorIconsFill.chatCircleText,
+                  isOutlined: true,
+                  onPressed: () => context.push(
+                    AppRoutes.orderChat,
+                    extra: {
+                      'orderId': order.id,
+                      'title': order.recipientName ?? 'Cliente',
+                    },
                   ),
+                ),
+                const SizedBox(height: 12),
+                _paymentCard(order),
+                if (order.specialInstructions != null &&
+                    order.specialInstructions!.isNotEmpty) ...[
+                  const SizedBox(height: 12),
+                  _noteCard(order.specialInstructions!),
                 ],
-              ),
-            );
-          }
-          if (!order.hasCoordinates) {
-            return SafeArea(
-              child: Column(
-                children: [
-                  AppBar(title: Text('Pedido ${order.code}')),
-                  Expanded(child: _DetailsList(order: order, launch: _launch)),
-                  _ActionBar(order: order, busy: _busy, onAdvance: _advance),
-                ],
-              ),
-            );
-          }
-          return _buildCourierView(order);
+                const SizedBox(height: 24),
+                if (order.status.driverActionLabel != null)
+                  AppButton(
+                    label: order.status.driverActionLabel!,
+                    isLoading: _busy,
+                    icon: PhosphorIconsBold.arrowRight,
+                    onPressed: () => _advance(order),
+                  ),
+                const SizedBox(height: 24),
+              ],
+            ),
+          );
         },
-        loading: () => const Center(child: CircularProgressIndicator()),
-        error: (e, s) => Center(child: Text('Error: $e')),
-      ),
-    );
-  }
-
-  // ── Vista courier: mapa a pantalla completa + hoja deslizable ──
-  Widget _buildCourierView(DeliveryOrder order) {
-    final branch = LatLng(order.branchLat, order.branchLng);
-    final delivery = LatLng(order.deliveryLat, order.deliveryLng);
-    final pickedUp = order.status == OrderStatus.pickedUp ||
-        order.status == OrderStatus.onTheWay;
-    final target = _targetFor(order);
-
-    return Stack(
-      children: [
-        FlutterMap(
-          mapController: _mapController,
-          options: MapOptions(
-            initialCenter: _driverPosition ?? branch,
-            initialZoom: 16,
-            onMapReady: () {
-              _mapReady = true;
-              if (_driverPosition == null) _fitAll(order);
-            },
-            onPositionChanged: (camera, hasGesture) {
-              // Si el repartidor mueve el mapa a mano, dejamos de seguirlo.
-              if (hasGesture && _follow) {
-                setState(() => _follow = false);
-              }
-            },
-          ),
-          children: [
-            TileLayer(
-              urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
-              userAgentPackageName: 'com.acme.acme_driver',
+        loading: () => const Center(
+            child: CircularProgressIndicator(color: AppColors.primary)),
+        error: (e, _) => Center(child: Text('Error: $e')),
             ),
-            PolylineLayer(
-              polylines: [
-                if (_route != null && _routeTarget == target)
-                  Polyline(
-                    points: _route!.points,
-                    strokeWidth: 6,
-                    color: AppColors.primary.withOpacity(0.85),
-                    borderStrokeWidth: 2,
-                    borderColor: Colors.white,
-                  )
-                else
-                  Polyline(
-                    points: [_driverPosition ?? branch, target],
-                    strokeWidth: 4,
-                    color: AppColors.primary.withOpacity(0.5),
-                    pattern: const StrokePattern.dotted(),
-                  ),
-              ],
-            ),
-            MarkerLayer(
-              markers: [
-                Marker(
-                  point: branch,
-                  width: 44,
-                  height: 44,
-                  child: _MapPin(
-                    icon: Icons.store,
-                    color: pickedUp
-                        ? AppColors.textHint
-                        : AppColors.primary,
-                  ),
-                ),
-                Marker(
-                  point: delivery,
-                  width: 44,
-                  height: 44,
-                  child: const _MapPin(
-                      icon: Icons.flag, color: AppColors.accent),
-                ),
-                if (_driverPosition != null)
-                  Marker(
-                    point: _driverPosition!,
-                    width: 54,
-                    height: 54,
-                    child: _DriverMarker(heading: _heading),
-                  ),
-              ],
-            ),
-          ],
-        ),
-
-        // ── Chip superior: fase + distancia + ETA ──
-        Positioned(
-          top: 0,
-          left: 0,
-          right: 0,
-          child: SafeArea(
-            child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-              child: _EtaChip(
-                phaseLabel: pickedUp
-                    ? 'Hacia el cliente'
-                    : 'Hacia ${order.branchName}',
-                route: _routeTarget == target ? _route : null,
-                speedKmh: _speedKmh,
-              ),
-            ),
-          ),
-        ),
-
-        // ── Botones flotantes ──
-        Positioned(
-          right: 12,
-          bottom: MediaQuery.of(context).size.height * 0.34,
-          child: Column(
-            children: [
-              _RoundButton(
-                icon: Icons.zoom_out_map,
-                tooltip: 'Ver todo el recorrido',
-                onTap: () => _fitAll(order),
-              ),
-              const SizedBox(height: 10),
-              _RoundButton(
-                icon: _follow ? Icons.gps_fixed : Icons.gps_not_fixed,
-                tooltip: 'Seguir mi posición',
-                active: _follow,
-                onTap: _recenter,
-              ),
-              const SizedBox(height: 10),
-              _RoundButton(
-                icon: Icons.navigation,
-                tooltip: 'Abrir en Google Maps',
-                onTap: () => _launch(Uri.parse(
-                    'https://www.google.com/maps/dir/?api=1&destination=${target.latitude},${target.longitude}&travelmode=driving')),
-              ),
-              const SizedBox(height: 10),
-              _RoundButton(
-                icon: Icons.chat_bubble_outline,
-                tooltip: 'Chat del pedido',
-                onTap: () => context.push(
-                    AppRoutes.orderChat(order.orderId, order.code)),
-              ),
-            ],
-          ),
-        ),
-
-        // ── Hoja deslizable con detalles y acción ──
-        DraggableScrollableSheet(
-          initialChildSize: 0.30,
-          minChildSize: 0.18,
-          maxChildSize: 0.72,
-          builder: (context, scrollController) {
-            return Container(
-              decoration: BoxDecoration(
-                color: Colors.white,
-                borderRadius:
-                    const BorderRadius.vertical(top: Radius.circular(20)),
-                boxShadow: [
-                  BoxShadow(
-                    color: Colors.black.withOpacity(0.12),
-                    blurRadius: 12,
-                    offset: const Offset(0, -4),
-                  ),
-                ],
-              ),
-              child: Column(
-                children: [
-                  const SizedBox(height: 8),
-                  Container(
-                    width: 40,
-                    height: 4,
-                    decoration: BoxDecoration(
-                      color: AppColors.border,
-                      borderRadius: BorderRadius.circular(2),
-                    ),
-                  ),
-                  Expanded(
-                    child: ListView(
-                      controller: scrollController,
-                      padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
-                      children: [
-                        Row(
-                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                          children: [
-                            Text(
-                              'Pedido ${order.code}',
-                              style: const TextStyle(
-                                  fontSize: 16, fontWeight: FontWeight.w700),
-                            ),
-                            StatusBadge(
-                              label: order.status.label,
-                              color: _statusColor(order.status),
-                            ),
-                          ],
-                        ),
-                        const SizedBox(height: 12),
-                        _StatusStepper(status: order.status),
-                        const SizedBox(height: 16),
-                        _DetailsContent(order: order, launch: _launch),
-                      ],
-                    ),
-                  ),
-                  _ActionBar(order: order, busy: _busy, onAdvance: _advance),
-                ],
-              ),
-            );
-          },
-        ),
-      ],
-    );
-  }
-
-  Color _statusColor(OrderStatus status) {
-    switch (status) {
-      case OrderStatus.driverAccepted:
-        return AppColors.orderAccepted;
-      case OrderStatus.pickedUp:
-        return AppColors.orderPickedUp;
-      case OrderStatus.onTheWay:
-        return AppColors.orderOnTheWay;
-      case OrderStatus.delivered:
-        return AppColors.orderDelivered;
-      default:
-        return AppColors.textSecondary;
-    }
-  }
-}
-
-// ── Widgets auxiliares ────────────────────────────────────────
-
-class _DriverMarker extends StatelessWidget {
-  final double heading;
-
-  const _DriverMarker({required this.heading});
-
-  @override
-  Widget build(BuildContext context) {
-    return Transform.rotate(
-      angle: heading * math.pi / 180,
-      child: Container(
-        decoration: BoxDecoration(
-          color: AppColors.success,
-          shape: BoxShape.circle,
-          border: Border.all(color: Colors.white, width: 3),
-          boxShadow: [
-            BoxShadow(
-              color: Colors.black.withOpacity(0.35),
-              blurRadius: 8,
-            ),
-          ],
-        ),
-        child: const Icon(Icons.navigation, color: Colors.white, size: 26),
-      ),
-    );
-  }
-}
-
-class _MapPin extends StatelessWidget {
-  final IconData icon;
-  final Color color;
-
-  const _MapPin({required this.icon, required this.color});
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      decoration: BoxDecoration(
-        color: color,
-        shape: BoxShape.circle,
-        border: Border.all(color: Colors.white, width: 3),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withOpacity(0.3),
-            blurRadius: 6,
           ),
         ],
       ),
-      child: Icon(icon, color: Colors.white, size: 22),
     );
   }
-}
 
-class _EtaChip extends StatelessWidget {
-  final String phaseLabel;
-  final RouteResult? route;
-  final double speedKmh;
-
-  const _EtaChip({
-    required this.phaseLabel,
-    required this.route,
-    required this.speedKmh,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(14),
-        boxShadow: [
-          BoxShadow(color: Colors.black.withOpacity(0.15), blurRadius: 8),
+  Widget _orderHeader(Order order) => Row(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        children: [
+          Text('Pedido #${order.orderCode}',
+              style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w700)),
+          StatusBadge(label: order.status.label, color: order.status.color),
         ],
+      );
+
+  Widget _statusStepper(OrderStatus status) {
+    const steps = [
+      OrderStatus.driverAccepted,
+      OrderStatus.pickedUp,
+      OrderStatus.onTheWay,
+      OrderStatus.delivered,
+    ];
+    const labels = ['Aceptado', 'Recogido', 'En camino', 'Entregado'];
+    final idx = steps.indexOf(status);
+    final current = idx < 0 ? (status == OrderStatus.delivered ? 3 : 0) : idx;
+
+    return Container(
+      padding: const EdgeInsets.symmetric(vertical: 18, horizontal: 12),
+      decoration: BoxDecoration(
+        color: AppColors.surface,
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: AppColors.border),
       ),
       child: Row(
+        children: List.generate(steps.length, (i) {
+          final step = steps[i];
+          final done = i <= current;
+          final isCurrent = i == current;
+          final color = step.color;
+          return Expanded(
+            child: Column(
+              children: [
+                Row(
+                  children: [
+                    Expanded(
+                      child: Container(
+                        height: 3,
+                        color: i == 0
+                            ? Colors.transparent
+                            : (i <= current ? color : AppColors.border),
+                      ),
+                    ),
+                    AnimatedContainer(
+                      duration: const Duration(milliseconds: 250),
+                      width: isCurrent ? 36 : 30,
+                      height: isCurrent ? 36 : 30,
+                      decoration: BoxDecoration(
+                        color: done ? color : AppColors.surfaceVariant,
+                        shape: BoxShape.circle,
+                        boxShadow: isCurrent
+                            ? [
+                                BoxShadow(
+                                    color: color.withValues(alpha: 0.4),
+                                    blurRadius: 10,
+                                    spreadRadius: 1)
+                              ]
+                            : null,
+                      ),
+                      child: Icon(
+                        i < current ? PhosphorIconsBold.check : step.icon,
+                        size: isCurrent ? 18 : 15,
+                        color: done ? Colors.white : AppColors.textHint,
+                      ),
+                    ),
+                    Expanded(
+                      child: Container(
+                        height: 3,
+                        color: i == steps.length - 1
+                            ? Colors.transparent
+                            : (i < current ? steps[i + 1].color : AppColors.border),
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 6),
+                Text(labels[i],
+                    textAlign: TextAlign.center,
+                    style: TextStyle(
+                        fontSize: 10.5,
+                        fontWeight:
+                            isCurrent ? FontWeight.w800 : FontWeight.w500,
+                        color: done ? color : AppColors.textHint)),
+              ],
+            ),
+          );
+        }),
+      ),
+    );
+  }
+
+  Widget _locationCard({
+    required String title,
+    required String name,
+    required String address,
+    String? reference,
+    String? phone,
+    double? lat,
+    double? lng,
+    required IconData icon,
+    required Color color,
+  }) {
+    return Container(
+      decoration: BoxDecoration(
+        color: AppColors.surface,
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: AppColors.border),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Icon(Icons.route, color: AppColors.primary, size: 20),
-          const SizedBox(width: 8),
-          Expanded(
-            child: Text(
-              phaseLabel,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: const TextStyle(
-                  fontSize: 13, fontWeight: FontWeight.w600),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 16, 16, 14),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Container(
+                  width: 44,
+                  height: 44,
+                  decoration: BoxDecoration(
+                    color: color.withValues(alpha: 0.12),
+                    borderRadius: BorderRadius.circular(14),
+                  ),
+                  child: Icon(icon, color: color, size: 22),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(title.toUpperCase(),
+                          style: TextStyle(
+                              color: color,
+                              fontWeight: FontWeight.w800,
+                              fontSize: 11,
+                              letterSpacing: 0.5)),
+                      const SizedBox(height: 3),
+                      Text(name,
+                          style: const TextStyle(
+                              fontSize: 16, fontWeight: FontWeight.w800)),
+                      const SizedBox(height: 4),
+                      Row(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          const Padding(
+                            padding: EdgeInsets.only(top: 2),
+                            child: Icon(PhosphorIconsRegular.mapPin,
+                                size: 14, color: AppColors.textHint),
+                          ),
+                          const SizedBox(width: 4),
+                          Expanded(
+                            child: Text(address,
+                                style: context.textTheme.bodyMedium),
+                          ),
+                        ],
+                      ),
+                      if (reference != null && reference.isNotEmpty) ...[
+                        const SizedBox(height: 6),
+                        Container(
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 8, vertical: 3),
+                          decoration: BoxDecoration(
+                            color: AppColors.surfaceVariant,
+                            borderRadius: BorderRadius.circular(8),
+                          ),
+                          child: Text('Ref: $reference',
+                              style: context.textTheme.bodySmall),
+                        ),
+                      ],
+                    ],
+                  ),
+                ),
+              ],
             ),
           ),
-          if (route != null) ...[
-            Text(
-              '${route!.distanceLabel} · ${route!.etaLabel}',
-              style: const TextStyle(
-                fontSize: 13,
-                fontWeight: FontWeight.w700,
-                color: AppColors.primary,
+          if ((lat != null && lng != null) ||
+              (phone != null && phone.isNotEmpty)) ...[
+            const Divider(height: 1),
+            Padding(
+              padding: const EdgeInsets.all(12),
+              child: Column(
+                children: [
+                  if (lat != null && lng != null)
+                    Row(
+                      children: [
+                        Expanded(
+                          child: AppButton(
+                            label: 'Maps',
+                            icon: PhosphorIconsFill.navigationArrow,
+                            onPressed: () => NavigationLauncher.navigateTo(
+                                lat, lng,
+                                label: name),
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: AppButton(
+                            label: 'Waze',
+                            icon: PhosphorIconsFill.car,
+                            backgroundColor: _wazeColor,
+                            onPressed: () =>
+                                NavigationLauncher.navigateWithWaze(lat, lng),
+                          ),
+                        ),
+                      ],
+                    ),
+                  if (phone != null && phone.isNotEmpty) ...[
+                    if (lat != null && lng != null) const SizedBox(height: 8),
+                    AppButton(
+                      label: 'Llamar',
+                      icon: PhosphorIconsRegular.phone,
+                      isOutlined: true,
+                      onPressed: () => NavigationLauncher.call(phone),
+                    ),
+                  ],
+                ],
               ),
-            ),
-          ] else
-            const Text(
-              'Calculando…',
-              style: TextStyle(fontSize: 12, color: AppColors.textHint),
-            ),
-          if (speedKmh > 1) ...[
-            const SizedBox(width: 8),
-            Text(
-              '${speedKmh.round()} km/h',
-              style: const TextStyle(
-                  fontSize: 11, color: AppColors.textSecondary),
             ),
           ],
         ],
       ),
     );
   }
-}
 
-class _RoundButton extends StatelessWidget {
-  final IconData icon;
-  final String tooltip;
-  final bool active;
-  final VoidCallback onTap;
-
-  const _RoundButton({
-    required this.icon,
-    required this.tooltip,
-    required this.onTap,
-    this.active = false,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return Tooltip(
-      message: tooltip,
-      child: Material(
-        color: active ? AppColors.primary : Colors.white,
-        shape: const CircleBorder(),
-        elevation: 4,
-        child: InkWell(
-          customBorder: const CircleBorder(),
-          onTap: onTap,
-          child: Padding(
-            padding: const EdgeInsets.all(12),
-            child: Icon(
-              icon,
-              size: 22,
-              color: active ? Colors.white : AppColors.textPrimary,
-            ),
+  Widget _paymentCard(Order order) => Card(
+        child: Padding(
+          padding: const EdgeInsets.all(16),
+          child: Column(
+            children: [
+              _row('Subtotal', order.subtotal.toCurrency),
+              _row('Envío', order.deliveryFee.toCurrency),
+              if (order.tipAmount > 0) _row('Propina', order.tipAmount.toCurrency),
+              const Divider(),
+              _row('Total', order.total.toCurrency, bold: true),
+              const SizedBox(height: 8),
+              Container(
+                padding: const EdgeInsets.all(10),
+                decoration: BoxDecoration(
+                  color: (order.mustCollectPayment
+                          ? AppColors.warning
+                          : AppColors.success)
+                      .withValues(alpha: 0.1),
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: Row(
+                  children: [
+                    Icon(
+                      order.mustCollectPayment
+                          ? PaymentUi.icon(order.paymentMethodCode)
+                          : PhosphorIconsRegular.checkCircle,
+                      size: 18,
+                      color: order.mustCollectPayment
+                          ? AppColors.warning
+                          : AppColors.success,
+                    ),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        order.mustCollectPayment
+                            ? 'Cobrar ${order.total.toCurrency} · ${order.paymentMethodLabel}'
+                            : 'Pagado en línea — no cobrar',
+                        style: const TextStyle(fontWeight: FontWeight.w600),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
           ),
         ),
-      ),
-    );
-  }
+      );
+
+  Widget _noteCard(String note) => Card(
+        color: AppColors.warning.withValues(alpha: 0.08),
+        child: Padding(
+          padding: const EdgeInsets.all(16),
+          child: Row(
+            children: [
+              const Icon(PhosphorIconsRegular.note, color: AppColors.warning),
+              const SizedBox(width: 12),
+              Expanded(child: Text(note)),
+            ],
+          ),
+        ),
+      );
+
+  Widget _row(String l, String v, {bool bold = false}) => Padding(
+        padding: const EdgeInsets.symmetric(vertical: 2),
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          children: [
+            Text(l,
+                style: TextStyle(
+                    fontWeight: bold ? FontWeight.w700 : FontWeight.normal)),
+            Text(v,
+                style: TextStyle(
+                    fontWeight: bold ? FontWeight.w700 : FontWeight.w600)),
+          ],
+        ),
+      );
 }
 
-class _StatusStepper extends StatelessWidget {
-  final OrderStatus status;
+/// Hoja de confirmación de entrega: evidencia + cobro en efectivo.
+class _DeliverySheet extends ConsumerStatefulWidget {
+  final Order order;
+  const _DeliverySheet({required this.order});
 
-  const _StatusStepper({required this.status});
+  @override
+  ConsumerState<_DeliverySheet> createState() => _DeliverySheetState();
+}
 
-  static const _steps = [
-    (OrderStatus.driverAccepted, Icons.store, 'Recoger'),
-    (OrderStatus.pickedUp, Icons.motorcycle, 'En ruta'),
-    (OrderStatus.onTheWay, Icons.flag, 'Entregar'),
-  ];
+class _DeliverySheetState extends ConsumerState<_DeliverySheet> {
+  bool _uploading = false;
+  bool _photoDone = false;
 
-  int get _currentIndex {
-    switch (status) {
-      case OrderStatus.driverAccepted:
-        return 0;
-      case OrderStatus.pickedUp:
-        return 1;
-      case OrderStatus.onTheWay:
-        return 2;
-      case OrderStatus.delivered:
-        return 3;
-      default:
-        return 0;
+  Future<void> _takePhoto() async {
+    final picked = await ImagePicker()
+        .pickImage(source: ImageSource.camera, imageQuality: 65, maxWidth: 1280);
+    if (picked == null) return;
+    setState(() => _uploading = true);
+    try {
+      final bytes = await picked.readAsBytes();
+      await ref
+          .read(orderDataSourceProvider)
+          .uploadDeliveryPhoto(widget.order.id, bytes);
+      setState(() => _photoDone = true);
+    } catch (e) {
+      if (mounted) context.showSnackBar('No se pudo subir la foto', isError: true);
+    } finally {
+      if (mounted) setState(() => _uploading = false);
     }
   }
 
   @override
   Widget build(BuildContext context) {
-    final current = _currentIndex;
-    return Row(
-      children: [
-        for (var i = 0; i < _steps.length; i++) ...[
-          if (i > 0)
-            Expanded(
-              child: Container(
-                height: 3,
-                color: i <= current
-                    ? AppColors.primary
-                    : AppColors.border,
-              ),
-            ),
-          Column(
-            children: [
-              Container(
-                width: 34,
-                height: 34,
-                decoration: BoxDecoration(
-                  color: i <= current ? AppColors.primary : AppColors.border,
-                  shape: BoxShape.circle,
-                ),
-                child: Icon(
-                  i < current ? Icons.check : _steps[i].$2,
-                  size: 18,
-                  color:
-                      i <= current ? Colors.white : AppColors.textSecondary,
-                ),
-              ),
-              const SizedBox(height: 4),
-              Text(
-                _steps[i].$3,
-                style: TextStyle(
-                  fontSize: 10,
-                  fontWeight:
-                      i == current ? FontWeight.w700 : FontWeight.w500,
-                  color: i <= current
-                      ? AppColors.primary
-                      : AppColors.textHint,
-                ),
-              ),
-            ],
-          ),
-        ],
-      ],
-    );
-  }
-}
-
-class _DetailsContent extends StatelessWidget {
-  final DeliveryOrder order;
-  final Future<void> Function(Uri) launch;
-
-  const _DetailsContent({required this.order, required this.launch});
-
-  @override
-  Widget build(BuildContext context) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        _ContactRow(
-          icon: Icons.store,
-          iconColor: AppColors.primary,
-          title: 'Recojo',
-          value: order.branchName,
-          phone: order.branchPhone,
-          launch: launch,
-        ),
-        const SizedBox(height: 10),
-        _ContactRow(
-          icon: Icons.flag,
-          iconColor: AppColors.accent,
-          title: 'Entrega',
-          value:
-              '${order.deliveryAddress}${order.deliveryReference != null ? '\nRef: ${order.deliveryReference}' : ''}',
-          phone: null,
-          launch: launch,
-        ),
-        const SizedBox(height: 10),
-        _ContactRow(
-          icon: Icons.person,
-          iconColor: AppColors.success,
-          title: 'Cliente',
-          value: order.recipientName,
-          phone: order.recipientPhone.isEmpty ? null : order.recipientPhone,
-          launch: launch,
-        ),
-        if (order.specialInstructions?.isNotEmpty == true) ...[
-          const SizedBox(height: 10),
-          InfoTile(
-            icon: Icons.sticky_note_2_outlined,
-            title: 'Instrucciones',
-            value: order.specialInstructions!,
-            iconColor: AppColors.warning,
-          ),
-        ],
-        if (order.items.isNotEmpty) ...[
+    final order = widget.order;
+    return Padding(
+      padding: EdgeInsets.only(
+        left: 24,
+        right: 24,
+        top: 24,
+        bottom: MediaQuery.of(context).viewInsets.bottom + 24,
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text('Confirmar entrega',
+              style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+          const SizedBox(height: 8),
+          const Text('Toma una foto como evidencia (recomendado).'),
           const SizedBox(height: 16),
-          const SectionHeader(title: 'Productos'),
-          const SizedBox(height: 4),
-          ...order.items.map(
-            (item) => Padding(
-              padding: const EdgeInsets.symmetric(vertical: 4),
+          AppButton(
+            label: _photoDone ? 'Foto cargada ✓' : 'Tomar foto de evidencia',
+            icon: _photoDone ? PhosphorIconsBold.check : PhosphorIconsRegular.camera,
+            isOutlined: true,
+            isLoading: _uploading,
+            onPressed: _photoDone ? null : _takePhoto,
+          ),
+          if (order.mustCollectPayment) ...[
+            const SizedBox(height: 16),
+            Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: AppColors.warning.withValues(alpha: 0.1),
+                borderRadius: BorderRadius.circular(8),
+              ),
               child: Row(
                 children: [
-                  Text(
-                    '${item.quantity}x',
-                    style: const TextStyle(
-                      fontWeight: FontWeight.w700,
-                      color: AppColors.primary,
-                      fontSize: 13,
-                    ),
-                  ),
+                  Icon(PaymentUi.icon(order.paymentMethodCode),
+                      color: AppColors.warning),
                   const SizedBox(width: 8),
                   Expanded(
-                    child: Text(item.name,
-                        style: const TextStyle(fontSize: 13)),
-                  ),
-                  Text(
-                    item.lineTotal.toCurrency,
-                    style: const TextStyle(fontSize: 13),
+                    child: Text(
+                        'Confirma que cobraste ${order.total.toCurrency} vía ${order.paymentMethodLabel}.'),
                   ),
                 ],
               ),
             ),
+          ],
+          const SizedBox(height: 20),
+          AppButton(
+            label: 'Confirmar entrega',
+            onPressed: () async {
+              if (order.isCashOnDelivery) {
+                try {
+                  await ref
+                      .read(activeOrderProvider.notifier)
+                      .collectCash(order.total);
+                } catch (_) {}
+              }
+              if (context.mounted) Navigator.pop(context, true);
+            },
           ),
         ],
-        const Divider(height: 24),
-        Container(
-          padding: const EdgeInsets.all(12),
-          decoration: BoxDecoration(
-            color: order.mustCollectPayment
-                ? AppColors.warning.withOpacity(0.1)
-                : AppColors.success.withOpacity(0.1),
-            borderRadius: BorderRadius.circular(12),
-            border: Border.all(
-              color: order.mustCollectPayment
-                  ? AppColors.warning.withOpacity(0.5)
-                  : AppColors.success.withOpacity(0.5),
-            ),
-          ),
-          child: Row(
-            children: [
-              Icon(
-                order.mustCollectPayment
-                    ? Icons.payments_outlined
-                    : Icons.check_circle_outline,
-                color: order.mustCollectPayment
-                    ? AppColors.warning
-                    : AppColors.success,
-              ),
-              const SizedBox(width: 10),
-              Expanded(
-                child: Text(
-                  order.mustCollectPayment
-                      ? 'COBRAR al cliente'
-                          '${order.paymentMethodName.isNotEmpty ? ' (${order.paymentMethodName})' : ''}'
-                      : 'Pedido PAGADO — no cobrar'
-                          '${order.paymentMethodName.isNotEmpty ? ' (${order.paymentMethodName})' : ''}',
-                  style: const TextStyle(
-                      fontWeight: FontWeight.w700, fontSize: 13),
-                ),
-              ),
-              Text(
-                order.mustCollectPayment ? order.total.toCurrency : '',
-                style: const TextStyle(
-                    fontWeight: FontWeight.w700, fontSize: 16),
-              ),
-            ],
-          ),
-        ),
-        Row(
-          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-          children: [
-            const Text('Tu ganancia (envío)',
-                style: TextStyle(
-                    fontSize: 13, color: AppColors.textSecondary)),
-            Text(
-              order.deliveryFee.toCurrency,
-              style: const TextStyle(
-                fontWeight: FontWeight.w700,
-                fontSize: 14,
-                color: AppColors.success,
-              ),
-            ),
-          ],
-        ),
-        const SizedBox(height: 8),
-      ],
-    );
-  }
-}
-
-class _ContactRow extends StatelessWidget {
-  final IconData icon;
-  final Color iconColor;
-  final String title;
-  final String value;
-  final String? phone;
-  final Future<void> Function(Uri) launch;
-
-  const _ContactRow({
-    required this.icon,
-    required this.iconColor,
-    required this.title,
-    required this.value,
-    required this.phone,
-    required this.launch,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return Row(
-      children: [
-        Expanded(
-          child: InfoTile(
-            icon: icon,
-            title: title,
-            value: value,
-            iconColor: iconColor,
-          ),
-        ),
-        if (phone != null)
-          IconButton(
-            onPressed: () => launch(Uri.parse('tel:$phone')),
-            icon: const Icon(Icons.phone, color: AppColors.success),
-            tooltip: 'Llamar',
-          ),
-      ],
-    );
-  }
-}
-
-class _DetailsList extends StatelessWidget {
-  final DeliveryOrder order;
-  final Future<void> Function(Uri) launch;
-
-  const _DetailsList({required this.order, required this.launch});
-
-  @override
-  Widget build(BuildContext context) {
-    return ListView(
-      padding: const EdgeInsets.all(16),
-      children: [
-        _StatusStepper(status: order.status),
-        const SizedBox(height: 16),
-        _DetailsContent(order: order, launch: launch),
-      ],
-    );
-  }
-}
-
-class _ActionBar extends StatelessWidget {
-  final DeliveryOrder order;
-  final bool busy;
-  final Future<void> Function(DeliveryOrder) onAdvance;
-
-  const _ActionBar({
-    required this.order,
-    required this.busy,
-    required this.onAdvance,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    final label = order.status.nextActionLabel;
-    if (label == null) return const SizedBox.shrink();
-
-    return SafeArea(
-      top: false,
-      child: Padding(
-        padding: const EdgeInsets.fromLTRB(16, 4, 16, 12),
-        child: SizedBox(
-          width: double.infinity,
-          child: ElevatedButton(
-            onPressed: busy ? null : () => onAdvance(order),
-            style: ElevatedButton.styleFrom(
-              padding: const EdgeInsets.symmetric(vertical: 15),
-              backgroundColor: order.status == OrderStatus.onTheWay
-                  ? AppColors.success
-                  : AppColors.primary,
-            ),
-            child: busy
-                ? const SizedBox(
-                    width: 20,
-                    height: 20,
-                    child: CircularProgressIndicator(
-                        strokeWidth: 2, color: Colors.white),
-                  )
-                : Text(label,
-                    style: const TextStyle(
-                        fontSize: 15, fontWeight: FontWeight.w700)),
-          ),
-        ),
       ),
     );
   }

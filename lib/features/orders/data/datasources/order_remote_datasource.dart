@@ -1,15 +1,21 @@
 import 'package:supabase_flutter/supabase_flutter.dart';
-import '../../../../core/constants/app_constants.dart';
 import '../../../../core/errors/app_exceptions.dart';
-import '../datasources/order_model.dart';
+import '../../domain/entities/order.dart';
+import 'order_model.dart';
 
 abstract class OrderRemoteDataSource {
-  Future<List<OrderModel>> getAvailableOrders();
-  Future<OrderModel?> getActiveOrder(String driverId);
-  Future<List<OrderModel>> getOrderHistory(String driverId);
-  Future<OrderModel> acceptOrder(String orderId, String driverId);
-  Future<OrderModel> updateOrderStatus(String orderId, String status);
-  Stream<List<OrderModel>> watchAvailableOrders();
+  /// Ofertas pendientes de aceptar (assignments en estado 'assigned').
+  Future<List<DeliveryOrderModel>> getOffers(String driverId);
+
+  /// Entrega activa (assignment aceptado cuyo pedido sigue en curso).
+  Future<DeliveryOrderModel?> getActiveDelivery(String driverId);
+
+  /// Entregas completadas / canceladas.
+  Future<List<DeliveryOrderModel>> getHistory(String driverId, {int limit});
+
+  Future<void> acceptOffer(String assignmentId);
+  Future<void> rejectOffer(String assignmentId, {String? reason});
+  Future<void> advanceOrderStatus(String orderId, OrderStatus toStatus);
 }
 
 class OrderRemoteDataSourceImpl implements OrderRemoteDataSource {
@@ -17,117 +23,112 @@ class OrderRemoteDataSourceImpl implements OrderRemoteDataSource {
 
   OrderRemoteDataSourceImpl(this._client);
 
+  static const _select = '''
+    id, order_id, status, assigned_at, accepted_at, completed_at,
+    order:orders (
+      id, order_code, status, subtotal, delivery_fee, total,
+      special_instructions, placed_at,
+      branch:merchant_branches ( id, name, phone, lat, lng ),
+      delivery:order_delivery_details ( address_snapshot, reference_snapshot,
+        lat, lng, recipient_name, recipient_phone,
+        estimated_distance_km, estimated_time_min ),
+      items:order_items ( product_name_snapshot, quantity, unit_price, line_total )
+    )''';
+
   @override
-  Future<List<OrderModel>> getAvailableOrders() async {
+  Future<List<DeliveryOrderModel>> getOffers(String driverId) async {
     try {
       final data = await _client
-          .from(AppConstants.ordersTable)
-          .select()
+          .from('order_assignments')
+          .select(_select)
+          .eq('driver_id', driverId)
           .eq('status', 'assigned')
-          .isFilter('driver_id', null)
-          .order('created_at', ascending: false);
+          .order('assigned_at', ascending: false);
 
-      return (data as List).map((e) => OrderModel.fromJson(e)).toList();
+      return (data as List)
+          .map((e) => DeliveryOrderModel.fromAssignmentJson(e))
+          .where((o) => o.status == OrderStatus.assigned)
+          .toList();
     } catch (e) {
-      // Return mock data if Supabase is not configured yet
-      return MockOrders.available;
+      throw OrderException('No se pudieron cargar las ofertas: $e');
     }
   }
 
   @override
-  Future<OrderModel?> getActiveOrder(String driverId) async {
+  Future<DeliveryOrderModel?> getActiveDelivery(String driverId) async {
     try {
       final data = await _client
-          .from(AppConstants.ordersTable)
-          .select()
+          .from('order_assignments')
+          .select(_select)
           .eq('driver_id', driverId)
-          .inFilter('status', ['accepted', 'picked_up', 'on_the_way'])
-          .maybeSingle();
+          .eq('status', 'accepted')
+          .order('accepted_at', ascending: false)
+          .limit(1);
 
-      if (data == null) return null;
-      return OrderModel.fromJson(data);
+      final list = (data as List)
+          .map((e) => DeliveryOrderModel.fromAssignmentJson(e))
+          .where((o) => o.status.isActiveForDriver)
+          .toList();
+      return list.isEmpty ? null : list.first;
     } catch (e) {
-      return null;
+      throw OrderException('No se pudo cargar el pedido activo: $e');
     }
   }
 
   @override
-  Future<List<OrderModel>> getOrderHistory(String driverId) async {
+  Future<List<DeliveryOrderModel>> getHistory(String driverId,
+      {int limit = 50}) async {
     try {
       final data = await _client
-          .from(AppConstants.ordersTable)
-          .select()
+          .from('order_assignments')
+          .select(_select)
           .eq('driver_id', driverId)
-          .inFilter('status', ['delivered', 'cancelled'])
-          .order('created_at', ascending: false)
-          .limit(AppConstants.pageSize);
+          .inFilter('status', ['completed', 'cancelled'])
+          .order('assigned_at', ascending: false)
+          .limit(limit);
 
-      return (data as List).map((e) => OrderModel.fromJson(e)).toList();
+      return (data as List)
+          .map((e) => DeliveryOrderModel.fromAssignmentJson(e))
+          .toList();
     } catch (e) {
-      return [];
+      throw OrderException('No se pudo cargar el historial: $e');
     }
   }
 
   @override
-  Future<OrderModel> acceptOrder(String orderId, String driverId) async {
+  Future<void> acceptOffer(String assignmentId) async {
     try {
-      final data = await _client
-          .from(AppConstants.ordersTable)
-          .update({
-            'driver_id': driverId,
-            'status': 'accepted',
-            'assigned_at': DateTime.now().toIso8601String(),
-          })
-          .eq('id', orderId)
-          .select()
-          .single();
-
-      await _client.from(AppConstants.orderStatusHistoryTable).insert({
-        'order_id': orderId,
-        'status': 'accepted',
-        'driver_id': driverId,
-        'created_at': DateTime.now().toIso8601String(),
-      });
-
-      return OrderModel.fromJson(data);
+      await _client.rpc('driver_accept_assignment',
+          params: {'p_assignment_id': assignmentId});
     } catch (e) {
-      throw OrderException('No se pudo aceptar el pedido: $e');
+      throw OrderException('No se pudo aceptar el pedido: ${_pgMessage(e)}');
     }
   }
 
   @override
-  Future<OrderModel> updateOrderStatus(String orderId, String status) async {
+  Future<void> rejectOffer(String assignmentId, {String? reason}) async {
     try {
-      final updates = <String, dynamic>{'status': status};
-      if (status == 'delivered') {
-        updates['delivered_at'] = DateTime.now().toIso8601String();
-      }
-
-      final data = await _client
-          .from(AppConstants.ordersTable)
-          .update(updates)
-          .eq('id', orderId)
-          .select()
-          .single();
-
-      await _client.from(AppConstants.orderStatusHistoryTable).insert({
-        'order_id': orderId,
-        'status': status,
-        'created_at': DateTime.now().toIso8601String(),
+      await _client.rpc('driver_reject_assignment', params: {
+        'p_assignment_id': assignmentId,
+        if (reason != null) 'p_reason': reason,
       });
-
-      return OrderModel.fromJson(data);
     } catch (e) {
-      throw OrderException('Error al actualizar estado: $e');
+      throw OrderException('No se pudo rechazar el pedido: ${_pgMessage(e)}');
     }
   }
 
   @override
-  Stream<List<OrderModel>> watchAvailableOrders() {
-    return _client
-        .from(AppConstants.ordersTable)
-        .stream(primaryKey: ['id'])
-        .eq('status', 'assigned')
-        .map((data) => data.map((e) => OrderModel.fromJson(e)).toList());
+  Future<void> advanceOrderStatus(String orderId, OrderStatus toStatus) async {
+    try {
+      await _client.rpc('driver_advance_order_status', params: {
+        'p_order_id': orderId,
+        'p_to_status': toStatus.value,
+      });
+    } catch (e) {
+      throw OrderException('No se pudo actualizar el estado: ${_pgMessage(e)}');
+    }
   }
+
+  static String _pgMessage(Object e) =>
+      e is PostgrestException ? e.message : e.toString();
 }

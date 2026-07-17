@@ -14,6 +14,7 @@ import '../../features/orders/presentation/screens/active_order_screen.dart';
 import '../../features/history/presentation/screens/history_screen.dart';
 import '../../features/earnings/presentation/screens/earnings_screen.dart';
 import '../../features/profile/presentation/screens/profile_screen.dart';
+import '../../features/notifications/presentation/screens/notifications_screen.dart';
 
 // Route name constants
 class AppRoutes {
@@ -28,6 +29,7 @@ class AppRoutes {
   static const history = '/history';
   static const earnings = '/earnings';
   static const profile = '/profile';
+  static const notifications = '/notifications';
 }
 
 final routerProvider = Provider<GoRouter>((ref) {
@@ -100,6 +102,10 @@ final routerProvider = Provider<GoRouter>((ref) {
           GoRoute(
             path: AppRoutes.profile,
             builder: (_, __) => const ProfileScreen(),
+          ),
+          GoRoute(
+            path: AppRoutes.notifications,
+            builder: (_, __) => const NotificationsScreen(),
           ),
         ],
       ),

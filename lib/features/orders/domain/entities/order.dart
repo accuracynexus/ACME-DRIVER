@@ -1,93 +1,146 @@
 import 'package:equatable/equatable.dart';
 
-class Order extends Equatable {
-  final String id;
-  final String code;
-  final String storeId;
-  final String storeName;
-  final String storeAddress;
-  final double storeLat;
-  final double storeLng;
-  final String storePhone;
-  final String customerId;
-  final String customerName;
-  final String customerPhone;
+/// Un pedido visto por el repartidor: asignación + pedido + local + entrega.
+class DeliveryOrder extends Equatable {
+  final String assignmentId;
+  final AssignmentStatus assignmentStatus;
+  final DateTime? assignedAt;
+  final DateTime? acceptedAt;
+  final DateTime? completedAt;
+
+  final String orderId;
+  final int orderCode;
+  final OrderStatus status;
+  final double subtotal;
+  final double deliveryFee;
+  final double total;
+  final String? specialInstructions;
+  final DateTime? placedAt;
+
+  // Local (recojo)
+  final String branchName;
+  final String? branchPhone;
+  final double branchLat;
+  final double branchLng;
+
+  // Entrega
   final String deliveryAddress;
+  final String? deliveryReference;
   final double deliveryLat;
   final double deliveryLng;
-  final double totalAmount;
-  final double deliveryFee;
-  final OrderStatus status;
-  final String? driverId;
-  final String? notes;
-  final DateTime createdAt;
-  final DateTime? assignedAt;
-  final DateTime? deliveredAt;
+  final String recipientName;
+  final String recipientPhone;
+  final double? estimatedDistanceKm;
+  final int? estimatedTimeMin;
 
-  const Order({
-    required this.id,
-    required this.code,
-    required this.storeId,
-    required this.storeName,
-    required this.storeAddress,
-    required this.storeLat,
-    required this.storeLng,
-    required this.storePhone,
-    required this.customerId,
-    required this.customerName,
-    required this.customerPhone,
+  final List<OrderItem> items;
+
+  const DeliveryOrder({
+    required this.assignmentId,
+    required this.assignmentStatus,
+    this.assignedAt,
+    this.acceptedAt,
+    this.completedAt,
+    required this.orderId,
+    required this.orderCode,
+    required this.status,
+    required this.subtotal,
+    required this.deliveryFee,
+    required this.total,
+    this.specialInstructions,
+    this.placedAt,
+    required this.branchName,
+    this.branchPhone,
+    required this.branchLat,
+    required this.branchLng,
     required this.deliveryAddress,
+    this.deliveryReference,
     required this.deliveryLat,
     required this.deliveryLng,
-    required this.totalAmount,
-    required this.deliveryFee,
-    required this.status,
-    this.driverId,
-    this.notes,
-    required this.createdAt,
-    this.assignedAt,
-    this.deliveredAt,
+    required this.recipientName,
+    required this.recipientPhone,
+    this.estimatedDistanceKm,
+    this.estimatedTimeMin,
+    this.items = const [],
   });
 
-  Order copyWith({OrderStatus? status, String? driverId}) {
-    return Order(
-      id: id,
-      code: code,
-      storeId: storeId,
-      storeName: storeName,
-      storeAddress: storeAddress,
-      storeLat: storeLat,
-      storeLng: storeLng,
-      storePhone: storePhone,
-      customerId: customerId,
-      customerName: customerName,
-      customerPhone: customerPhone,
-      deliveryAddress: deliveryAddress,
-      deliveryLat: deliveryLat,
-      deliveryLng: deliveryLng,
-      totalAmount: totalAmount,
-      deliveryFee: deliveryFee,
-      status: status ?? this.status,
-      driverId: driverId ?? this.driverId,
-      notes: notes,
-      createdAt: createdAt,
-      assignedAt: assignedAt,
-      deliveredAt: deliveredAt,
-    );
-  }
+  String get code => '#$orderCode';
+
+  bool get hasCoordinates =>
+      (branchLat != 0 || branchLng != 0) && (deliveryLat != 0 || deliveryLng != 0);
 
   @override
-  List<Object?> get props => [id, status, driverId];
+  List<Object?> get props => [assignmentId, orderId, status, assignmentStatus];
 }
 
-enum OrderStatus { assigned, accepted, pickedUp, onTheWay, delivered, cancelled }
+class OrderItem extends Equatable {
+  final String name;
+  final int quantity;
+  final double unitPrice;
+  final double lineTotal;
+
+  const OrderItem({
+    required this.name,
+    required this.quantity,
+    required this.unitPrice,
+    required this.lineTotal,
+  });
+
+  @override
+  List<Object?> get props => [name, quantity, lineTotal];
+}
+
+enum AssignmentStatus { assigned, accepted, rejected, cancelled, completed }
+
+extension AssignmentStatusX on AssignmentStatus {
+  static AssignmentStatus fromString(String? v) {
+    switch (v) {
+      case 'accepted':
+        return AssignmentStatus.accepted;
+      case 'rejected':
+        return AssignmentStatus.rejected;
+      case 'cancelled':
+        return AssignmentStatus.cancelled;
+      case 'completed':
+        return AssignmentStatus.completed;
+      default:
+        return AssignmentStatus.assigned;
+    }
+  }
+}
+
+/// Estados del pedido (enum public.order_status del backend).
+enum OrderStatus {
+  pendingPayment,
+  placed,
+  confirmed,
+  preparing,
+  readyForPickup,
+  assigned,
+  driverAccepted,
+  pickedUp,
+  onTheWay,
+  delivered,
+  cancelled,
+  failed,
+}
 
 extension OrderStatusExtension on OrderStatus {
   String get label {
     switch (this) {
+      case OrderStatus.pendingPayment:
+        return 'Pago pendiente';
+      case OrderStatus.placed:
+        return 'Recibido';
+      case OrderStatus.confirmed:
+        return 'Confirmado';
+      case OrderStatus.preparing:
+        return 'En preparación';
+      case OrderStatus.readyForPickup:
+        return 'Listo para recojo';
       case OrderStatus.assigned:
-        return 'Asignado';
-      case OrderStatus.accepted:
+        return 'Oferta asignada';
+      case OrderStatus.driverAccepted:
         return 'Aceptado';
       case OrderStatus.pickedUp:
         return 'Recogido';
@@ -97,15 +150,27 @@ extension OrderStatusExtension on OrderStatus {
         return 'Entregado';
       case OrderStatus.cancelled:
         return 'Cancelado';
+      case OrderStatus.failed:
+        return 'Fallido';
     }
   }
 
   String get value {
     switch (this) {
+      case OrderStatus.pendingPayment:
+        return 'pending_payment';
+      case OrderStatus.placed:
+        return 'placed';
+      case OrderStatus.confirmed:
+        return 'confirmed';
+      case OrderStatus.preparing:
+        return 'preparing';
+      case OrderStatus.readyForPickup:
+        return 'ready_for_pickup';
       case OrderStatus.assigned:
         return 'assigned';
-      case OrderStatus.accepted:
-        return 'accepted';
+      case OrderStatus.driverAccepted:
+        return 'driver_accepted';
       case OrderStatus.pickedUp:
         return 'picked_up';
       case OrderStatus.onTheWay:
@@ -114,34 +179,22 @@ extension OrderStatusExtension on OrderStatus {
         return 'delivered';
       case OrderStatus.cancelled:
         return 'cancelled';
+      case OrderStatus.failed:
+        return 'failed';
     }
   }
 
-  static OrderStatus fromString(String value) {
-    switch (value) {
-      case 'assigned':
-        return OrderStatus.assigned;
-      case 'accepted':
-        return OrderStatus.accepted;
-      case 'picked_up':
-        return OrderStatus.pickedUp;
-      case 'on_the_way':
-        return OrderStatus.onTheWay;
-      case 'delivered':
-        return OrderStatus.delivered;
-      case 'cancelled':
-        return OrderStatus.cancelled;
-      default:
-        return OrderStatus.assigned;
+  static OrderStatus fromString(String? value) {
+    for (final s in OrderStatus.values) {
+      if (s.value == value) return s;
     }
+    return OrderStatus.placed;
   }
 
-  /// Returns the next valid status in the flow
+  /// Siguiente estado que el repartidor puede reportar.
   OrderStatus? get next {
     switch (this) {
-      case OrderStatus.assigned:
-        return OrderStatus.accepted;
-      case OrderStatus.accepted:
+      case OrderStatus.driverAccepted:
         return OrderStatus.pickedUp;
       case OrderStatus.pickedUp:
         return OrderStatus.onTheWay;
@@ -151,4 +204,23 @@ extension OrderStatusExtension on OrderStatus {
         return null;
     }
   }
+
+  /// Etiqueta del botón para avanzar al siguiente estado.
+  String? get nextActionLabel {
+    switch (this) {
+      case OrderStatus.driverAccepted:
+        return 'Ya recogí el pedido';
+      case OrderStatus.pickedUp:
+        return 'Iniciar entrega';
+      case OrderStatus.onTheWay:
+        return 'Confirmar entrega';
+      default:
+        return null;
+    }
+  }
+
+  bool get isActiveForDriver =>
+      this == OrderStatus.driverAccepted ||
+      this == OrderStatus.pickedUp ||
+      this == OrderStatus.onTheWay;
 }

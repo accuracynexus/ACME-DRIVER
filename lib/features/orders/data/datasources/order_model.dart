@@ -1,126 +1,83 @@
 import '../../domain/entities/order.dart';
 
-class OrderModel extends Order {
-  const OrderModel({
-    required super.id,
-    required super.code,
-    required super.storeId,
-    required super.storeName,
-    required super.storeAddress,
-    required super.storeLat,
-    required super.storeLng,
-    required super.storePhone,
-    required super.customerId,
-    required super.customerName,
-    required super.customerPhone,
+class DeliveryOrderModel extends DeliveryOrder {
+  const DeliveryOrderModel({
+    required super.assignmentId,
+    required super.assignmentStatus,
+    super.assignedAt,
+    super.acceptedAt,
+    super.completedAt,
+    required super.orderId,
+    required super.orderCode,
+    required super.status,
+    required super.subtotal,
+    required super.deliveryFee,
+    required super.total,
+    super.specialInstructions,
+    super.placedAt,
+    required super.branchName,
+    super.branchPhone,
+    required super.branchLat,
+    required super.branchLng,
     required super.deliveryAddress,
+    super.deliveryReference,
     required super.deliveryLat,
     required super.deliveryLng,
-    required super.totalAmount,
-    required super.deliveryFee,
-    required super.status,
-    super.driverId,
-    super.notes,
-    required super.createdAt,
-    super.assignedAt,
-    super.deliveredAt,
+    required super.recipientName,
+    required super.recipientPhone,
+    super.estimatedDistanceKm,
+    super.estimatedTimeMin,
+    super.items,
   });
 
-  factory OrderModel.fromJson(Map<String, dynamic> json) {
-    return OrderModel(
-      id: json['id'] as String,
-      code: json['code'] as String? ?? '#000',
-      storeId: json['store_id'] as String? ?? '',
-      storeName: json['store_name'] as String? ?? 'Local',
-      storeAddress: json['store_address'] as String? ?? '',
-      storeLat: (json['store_lat'] as num?)?.toDouble() ?? 0.0,
-      storeLng: (json['store_lng'] as num?)?.toDouble() ?? 0.0,
-      storePhone: json['store_phone'] as String? ?? '',
-      customerId: json['customer_id'] as String? ?? '',
-      customerName: json['customer_name'] as String? ?? 'Cliente',
-      customerPhone: json['customer_phone'] as String? ?? '',
-      deliveryAddress: json['delivery_address'] as String? ?? '',
-      deliveryLat: (json['delivery_lat'] as num?)?.toDouble() ?? 0.0,
-      deliveryLng: (json['delivery_lng'] as num?)?.toDouble() ?? 0.0,
-      totalAmount: (json['total_amount'] as num?)?.toDouble() ?? 0.0,
-      deliveryFee: (json['delivery_fee'] as num?)?.toDouble() ?? 0.0,
-      status: OrderStatusExtension.fromString(json['status'] as String? ?? 'assigned'),
-      driverId: json['driver_id'] as String?,
-      notes: json['notes'] as String?,
-      createdAt: DateTime.parse(json['created_at'] as String),
-      assignedAt: json['assigned_at'] != null ? DateTime.parse(json['assigned_at'] as String) : null,
-      deliveredAt: json['delivered_at'] != null ? DateTime.parse(json['delivered_at'] as String) : null,
+  /// Parsea una fila de order_assignments con el pedido anidado:
+  /// order:orders(..., branch:merchant_branches(...),
+  /// delivery:order_delivery_details(...), items:order_items(...)).
+  factory DeliveryOrderModel.fromAssignmentJson(Map<String, dynamic> json) {
+    final order = (json['order'] as Map<String, dynamic>?) ?? const {};
+    final branch = (order['branch'] as Map<String, dynamic>?) ?? const {};
+    final delivery = (order['delivery'] as Map<String, dynamic>?) ?? const {};
+    final itemsJson = (order['items'] as List?) ?? const [];
+
+    return DeliveryOrderModel(
+      assignmentId: json['id'] as String,
+      assignmentStatus: AssignmentStatusX.fromString(json['status'] as String?),
+      assignedAt: _date(json['assigned_at']),
+      acceptedAt: _date(json['accepted_at']),
+      completedAt: _date(json['completed_at']),
+      orderId: order['id'] as String? ?? '',
+      orderCode: (order['order_code'] as num?)?.toInt() ?? 0,
+      status: OrderStatusExtension.fromString(order['status'] as String?),
+      subtotal: _num(order['subtotal']),
+      deliveryFee: _num(order['delivery_fee']),
+      total: _num(order['total']),
+      specialInstructions: order['special_instructions'] as String?,
+      placedAt: _date(order['placed_at']),
+      branchName: branch['name'] as String? ?? 'Local',
+      branchPhone: branch['phone'] as String?,
+      branchLat: _num(branch['lat']),
+      branchLng: _num(branch['lng']),
+      deliveryAddress: delivery['address_snapshot'] as String? ?? '',
+      deliveryReference: delivery['reference_snapshot'] as String?,
+      deliveryLat: _num(delivery['lat']),
+      deliveryLng: _num(delivery['lng']),
+      recipientName: delivery['recipient_name'] as String? ?? 'Cliente',
+      recipientPhone: delivery['recipient_phone'] as String? ?? '',
+      estimatedDistanceKm: (delivery['estimated_distance_km'] as num?)?.toDouble(),
+      estimatedTimeMin: (delivery['estimated_time_min'] as num?)?.toInt(),
+      items: itemsJson
+          .map((e) => OrderItem(
+                name: e['product_name_snapshot'] as String? ?? '',
+                quantity: (e['quantity'] as num?)?.toInt() ?? 1,
+                unitPrice: _num(e['unit_price']),
+                lineTotal: _num(e['line_total']),
+              ))
+          .toList(),
     );
   }
 
-  Map<String, dynamic> toJson() {
-    return {
-      'id': id,
-      'code': code,
-      'store_id': storeId,
-      'store_name': storeName,
-      'store_address': storeAddress,
-      'store_lat': storeLat,
-      'store_lng': storeLng,
-      'store_phone': storePhone,
-      'customer_id': customerId,
-      'customer_name': customerName,
-      'customer_phone': customerPhone,
-      'delivery_address': deliveryAddress,
-      'delivery_lat': deliveryLat,
-      'delivery_lng': deliveryLng,
-      'total_amount': totalAmount,
-      'delivery_fee': deliveryFee,
-      'status': status.value,
-      'driver_id': driverId,
-      'notes': notes,
-      'created_at': createdAt.toIso8601String(),
-    };
-  }
-}
+  static double _num(dynamic v) => (v as num?)?.toDouble() ?? 0.0;
 
-/// Mock orders for development/demo
-class MockOrders {
-  static List<OrderModel> get available => [
-        OrderModel(
-          id: 'ord-001',
-          code: '#ACM-001',
-          storeId: 'store-1',
-          storeName: 'Pollería El Rey',
-          storeAddress: 'Jr. Virrey Toledo 320, Huancavelica',
-          storeLat: -12.7869,
-          storeLng: -74.9734,
-          storePhone: '967000001',
-          customerId: 'cust-1',
-          customerName: 'María Torres',
-          customerPhone: '987111222',
-          deliveryAddress: 'Av. Los Héroes 150, Huancavelica',
-          deliveryLat: -12.7920,
-          deliveryLng: -74.9710,
-          totalAmount: 35.00,
-          deliveryFee: 5.00,
-          status: OrderStatus.assigned,
-          createdAt: DateTime.now().subtract(const Duration(minutes: 3)),
-        ),
-        OrderModel(
-          id: 'ord-002',
-          code: '#ACM-002',
-          storeId: 'store-2',
-          storeName: 'Chifa Fortuna',
-          storeAddress: 'Jr. Barranca 210, Huancavelica',
-          storeLat: -12.7855,
-          storeLng: -74.9720,
-          storePhone: '967000002',
-          customerId: 'cust-2',
-          customerName: 'Carlos Ruiz',
-          customerPhone: '987333444',
-          deliveryAddress: 'Urb. Santa Rosa Mz B Lt 5, Huancavelica',
-          deliveryLat: -12.7900,
-          deliveryLng: -74.9745,
-          totalAmount: 52.00,
-          deliveryFee: 6.00,
-          status: OrderStatus.assigned,
-          createdAt: DateTime.now().subtract(const Duration(minutes: 7)),
-        ),
-      ];
+  static DateTime? _date(dynamic v) =>
+      v == null ? null : DateTime.tryParse(v as String);
 }

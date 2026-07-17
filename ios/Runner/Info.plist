@@ -26,6 +26,16 @@
 	<string>$(FLUTTER_BUILD_NUMBER)</string>
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
+	<key>NSLocationWhenInUseUsageDescription</key>
+	<string>ACME-DRIVER usa tu ubicación para asignarte pedidos cercanos y compartir tu posición durante las entregas.</string>
+	<key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
+	<string>ACME-DRIVER usa tu ubicación para asignarte pedidos cercanos y compartir tu posición durante las entregas.</string>
+	<key>LSApplicationQueriesSchemes</key>
+	<array>
+		<string>tel</string>
+		<string>https</string>
+		<string>comgooglemaps</string>
+	</array>
 	<key>UIApplicationSceneManifest</key>
 	<dict>
 		<key>UIApplicationSupportsMultipleScenes</key>

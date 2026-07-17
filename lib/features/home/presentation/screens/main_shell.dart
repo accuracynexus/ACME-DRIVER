@@ -1,11 +1,54 @@
-import 'package:flutter/material.dart';
-import 'package:go_router/go_router.dart';
-import '../../../../core/router/app_router.dart';
+import 'dart:async';
 
-class MainShell extends StatelessWidget {
+import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
+import '../../../../core/constants/app_constants.dart';
+import '../../../../core/router/app_router.dart';
+import '../../../../core/services/location_service.dart';
+import '../../../../core/services/notification_service.dart';
+import '../../../auth/presentation/providers/auth_provider.dart';
+import '../../../notifications/presentation/providers/notification_provider.dart';
+import '../../../orders/presentation/providers/order_provider.dart';
+
+class MainShell extends ConsumerStatefulWidget {
   final Widget child;
 
   const MainShell({super.key, required this.child});
+
+  @override
+  ConsumerState<MainShell> createState() => _MainShellState();
+}
+
+class _MainShellState extends ConsumerState<MainShell> {
+  Timer? _notificationsTimer;
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      ref.read(notificationServiceProvider).initialize();
+      ref.read(locationServiceProvider).ensurePermission();
+      ref.read(orderSyncProvider).start();
+
+      // Si el repartidor ya estaba en línea, retomar el envío de ubicación.
+      final driver = ref.read(currentDriverProvider).value;
+      if (driver?.isOnline == true) {
+        ref.read(locationServiceProvider).start();
+      }
+
+      _notificationsTimer = Timer.periodic(
+        const Duration(seconds: AppConstants.notificationsPollInterval),
+        (_) => ref.invalidate(notificationsProvider),
+      );
+    });
+  }
+
+  @override
+  void dispose() {
+    _notificationsTimer?.cancel();
+    super.dispose();
+  }
 
   int _calculateSelectedIndex(BuildContext context) {
     final String location = GoRouterState.of(context).uri.path;
@@ -40,7 +83,7 @@ class MainShell extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      body: child,
+      body: widget.child,
       bottomNavigationBar: Container(
         decoration: BoxDecoration(
           boxShadow: [

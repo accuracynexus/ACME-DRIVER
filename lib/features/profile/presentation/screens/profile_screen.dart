@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import '../../../../core/constants/app_colors.dart';
 import '../../../auth/presentation/providers/auth_provider.dart';
 
 class ProfileScreen extends ConsumerWidget {
@@ -35,23 +36,70 @@ class ProfileScreen extends ConsumerWidget {
               Text(
                 driver.fullName,
                 textAlign: TextAlign.center,
-                style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
+                style:
+                    const TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
               ),
+              const SizedBox(height: 4),
+              Text(driver.email, textAlign: TextAlign.center),
               const SizedBox(height: 8),
-              Text(
-                driver.email,
-                textAlign: TextAlign.center,
+              Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Icon(
+                    driver.isVerified ? Icons.verified : Icons.hourglass_top,
+                    size: 16,
+                    color: driver.isVerified
+                        ? AppColors.success
+                        : AppColors.warning,
+                  ),
+                  const SizedBox(width: 4),
+                  Text(
+                    driver.isVerified
+                        ? 'Cuenta verificada'
+                        : 'Verificación pendiente',
+                    style: TextStyle(
+                      fontSize: 12,
+                      color: driver.isVerified
+                          ? AppColors.success
+                          : AppColors.warning,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ],
               ),
               const Divider(height: 32),
               ListTile(
                 leading: const Icon(Icons.directions_car),
                 title: const Text('Vehículo'),
-                subtitle: Text('${driver.vehicleType} - ${driver.licensePlate ?? "Sin placa"}'),
+                subtitle: Text(
+                  '${driver.vehicleTypeName.isNotEmpty ? driver.vehicleTypeName : driver.vehicleType}'
+                  '${driver.licensePlate != null ? ' - ${driver.licensePlate}' : ''}',
+                ),
               ),
+              if (driver.licenseNumber != null)
+                ListTile(
+                  leading: const Icon(Icons.badge_outlined),
+                  title: const Text('Licencia'),
+                  subtitle: Text(driver.licenseNumber!),
+                ),
+              if (driver.dni != null)
+                ListTile(
+                  leading: const Icon(Icons.credit_card),
+                  title: const Text('DNI'),
+                  subtitle: Text(driver.dni!),
+                ),
               ListTile(
                 leading: const Icon(Icons.phone),
                 title: const Text('Teléfono'),
-                subtitle: Text(driver.phone),
+                subtitle: Text(
+                    driver.phone.isNotEmpty ? driver.phone : 'No registrado'),
+              ),
+              ListTile(
+                leading: const Icon(Icons.star_outline),
+                title: const Text('Calificación'),
+                subtitle: Text(driver.rating > 0
+                    ? driver.rating.toStringAsFixed(1)
+                    : 'Sin calificaciones aún'),
               ),
             ],
           );

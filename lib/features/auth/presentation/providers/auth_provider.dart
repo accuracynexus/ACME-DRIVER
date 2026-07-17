@@ -1,8 +1,8 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../../data/datasources/driver_profile_model.dart';
-import '../../domain/entities/driver_profile.dart';
 import '../../data/repositories/auth_remote_datasource.dart';
+import '../../../../core/services/location_service.dart';
 import '../../../../shared/providers/supabase_provider.dart';
 
 // ── Data source provider ────────────────────────────────────
@@ -16,20 +16,30 @@ final authStateProvider = StreamProvider<AuthState>((ref) {
 });
 
 // ── Current driver provider ──────────────────────────────────
-final currentDriverProvider = StateNotifierProvider<AuthNotifier, AsyncValue<DriverProfileModel?>>((ref) {
-  return AuthNotifier(ref.watch(authDataSourceProvider));
+final currentDriverProvider =
+    StateNotifierProvider<AuthNotifier, AsyncValue<DriverProfileModel?>>((ref) {
+  return AuthNotifier(
+    ref.watch(authDataSourceProvider),
+    ref.watch(locationServiceProvider),
+  );
 });
 
 class AuthNotifier extends StateNotifier<AsyncValue<DriverProfileModel?>> {
   final AuthRemoteDataSource _dataSource;
+  final LocationService _locationService;
 
-  AuthNotifier(this._dataSource) : super(const AsyncValue.loading()) {
+  AuthNotifier(this._dataSource, this._locationService)
+      : super(const AsyncValue.loading()) {
     _init();
   }
 
   Future<void> _init() async {
-    final driver = await _dataSource.getCurrentDriver();
-    state = AsyncValue.data(driver);
+    try {
+      final driver = await _dataSource.getCurrentDriver();
+      state = AsyncValue.data(driver);
+    } catch (e, st) {
+      state = AsyncValue.error(e, st);
+    }
   }
 
   Future<void> signIn(String email, String password) async {
@@ -56,6 +66,10 @@ class AuthNotifier extends StateNotifier<AsyncValue<DriverProfileModel?>> {
   }
 
   Future<void> signOut() async {
+    try {
+      await _dataSource.setOnline(false);
+    } catch (_) {}
+    _locationService.stop();
     await _dataSource.signOut();
     state = const AsyncValue.data(null);
   }
@@ -64,15 +78,34 @@ class AuthNotifier extends StateNotifier<AsyncValue<DriverProfileModel?>> {
     await _dataSource.sendPasswordResetEmail(email);
   }
 
-  Future<void> toggleStatus() async {
+  /// Conecta/desconecta al repartidor. Al conectarse envía la posición actual
+  /// y arranca el envío periódico de ubicación.
+  Future<void> toggleOnline() async {
     final current = state.value;
     if (current == null) return;
 
-    final newStatus =
-        current.status == DriverStatus.available ? 'offline' : 'available';
-    await _dataSource.updateDriverStatus(newStatus);
+    final goOnline = !current.isOnline;
+    double? lat;
+    double? lng;
+    if (goOnline) {
+      final pos = await _locationService.getCurrentPosition();
+      lat = pos?.latitude;
+      lng = pos?.longitude;
+    }
 
+    await _dataSource.setOnline(goOnline, lat: lat, lng: lng);
+
+    if (goOnline) {
+      _locationService.start();
+    } else {
+      _locationService.stop();
+    }
+
+    await refresh();
+  }
+
+  Future<void> refresh() async {
     final updated = await _dataSource.getCurrentDriver();
-    state = AsyncValue.data(updated);
+    if (mounted) state = AsyncValue.data(updated);
   }
 }

@@ -1,8 +1,12 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
+import 'package:timeago/timeago.dart' as timeago;
 import '../../../../core/constants/app_colors.dart';
 import '../../../../core/extensions/extensions.dart';
+import '../../../../core/router/app_router.dart';
 import '../../../../shared/widgets/common_widgets.dart';
+import '../../../auth/presentation/providers/auth_provider.dart';
 import '../../domain/entities/order.dart';
 import '../providers/order_provider.dart';
 
@@ -11,51 +15,91 @@ class AvailableOrdersScreen extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final availableOrdersAsync = ref.watch(availableOrdersProvider);
+    final offersAsync = ref.watch(offersProvider);
+    final driver = ref.watch(currentDriverProvider).value;
 
     return Scaffold(
-      appBar: AppBar(
-        title: const Text('Pedidos Disponibles'),
-      ),
-      body: availableOrdersAsync.when(
-        data: (orders) {
-          if (orders.isEmpty) {
-            return const EmptyState(
-              icon: Icons.inbox_outlined,
-              title: 'No hay pedidos',
-              subtitle: 'Por ahora no hay pedidos disponibles en tu zona.',
+      appBar: AppBar(title: const Text('Ofertas de Pedidos')),
+      body: offersAsync.when(
+        data: (offers) {
+          if (offers.isEmpty) {
+            final offline = driver != null && !driver.isOnline;
+            return EmptyState(
+              icon: offline ? Icons.wifi_off : Icons.inbox_outlined,
+              title: offline ? 'Estás desconectado' : 'No hay ofertas',
+              subtitle: offline
+                  ? 'Conéctate desde Inicio para recibir pedidos.'
+                  : 'Cuando te asignen un pedido aparecerá aquí.',
             );
           }
 
           return RefreshIndicator(
-            onRefresh: () async {
-              ref.invalidate(availableOrdersProvider);
-            },
+            onRefresh: () async => ref.invalidate(offersProvider),
             child: ListView.separated(
               padding: const EdgeInsets.all(16),
-              itemCount: orders.length,
+              itemCount: offers.length,
               separatorBuilder: (_, __) => const SizedBox(height: 16),
-              itemBuilder: (context, index) {
-                final order = orders[index];
-                return _OrderCard(order: order);
-              },
+              itemBuilder: (context, index) =>
+                  _OfferCard(offer: offers[index]),
             ),
           );
         },
         loading: () => const Center(child: CircularProgressIndicator()),
-        error: (e, s) => Center(child: Text('Error: $e')),
+        error: (e, s) => Center(
+          child: Padding(
+            padding: const EdgeInsets.all(24),
+            child: Text('Error: $e', textAlign: TextAlign.center),
+          ),
+        ),
       ),
     );
   }
 }
 
-class _OrderCard extends ConsumerWidget {
-  final Order order;
+class _OfferCard extends ConsumerStatefulWidget {
+  final DeliveryOrder offer;
 
-  const _OrderCard({required this.order});
+  const _OfferCard({required this.offer});
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<_OfferCard> createState() => _OfferCardState();
+}
+
+class _OfferCardState extends ConsumerState<_OfferCard> {
+  bool _busy = false;
+
+  Future<void> _accept() async {
+    setState(() => _busy = true);
+    try {
+      await ref.read(activeOrderProvider.notifier).acceptOffer(widget.offer);
+      if (mounted) {
+        context.showSnackBar('Pedido aceptado');
+        context.go(AppRoutes.activeOrder);
+      }
+    } catch (e) {
+      if (mounted) context.showSnackBar('$e', isError: true);
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  Future<void> _reject() async {
+    setState(() => _busy = true);
+    try {
+      await ref
+          .read(activeOrderProvider.notifier)
+          .rejectOffer(widget.offer, reason: 'Rechazado por el repartidor');
+      if (mounted) context.showSnackBar('Oferta rechazada');
+    } catch (e) {
+      if (mounted) context.showSnackBar('$e', isError: true);
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final offer = widget.offer;
     return Card(
       child: Padding(
         padding: const EdgeInsets.all(16),
@@ -66,11 +110,12 @@ class _OrderCard extends ConsumerWidget {
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
                 Text(
-                  order.code,
-                  style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 16),
+                  offer.code,
+                  style: const TextStyle(
+                      fontWeight: FontWeight.w700, fontSize: 16),
                 ),
                 Text(
-                  order.deliveryFee.toCurrency,
+                  offer.deliveryFee.toCurrency,
                   style: const TextStyle(
                     fontWeight: FontWeight.w700,
                     fontSize: 16,
@@ -79,29 +124,64 @@ class _OrderCard extends ConsumerWidget {
                 ),
               ],
             ),
+            if (offer.assignedAt != null)
+              Text(
+                'Ofertado ${timeago.format(offer.assignedAt!, locale: 'es')}',
+                style:
+                    const TextStyle(fontSize: 11, color: AppColors.textHint),
+              ),
             const SizedBox(height: 16),
             InfoTile(
               icon: Icons.store,
               title: 'Recojo',
-              value: order.storeName,
+              value: offer.branchName,
             ),
             const SizedBox(height: 8),
             InfoTile(
-              icon: Icons.person,
+              icon: Icons.flag,
               title: 'Entrega',
-              value: order.deliveryAddress,
+              value: offer.deliveryAddress,
               iconColor: AppColors.accent,
             ),
-            const SizedBox(height: 16),
-            SizedBox(
-              width: double.infinity,
-              child: ElevatedButton(
-                onPressed: () {
-                  ref.read(activeOrderProvider.notifier).acceptOrder(order.id);
-                  // Optionally navigate to active order screen
-                },
-                child: const Text('Aceptar Pedido'),
+            if (offer.estimatedDistanceKm != null) ...[
+              const SizedBox(height: 8),
+              InfoTile(
+                icon: Icons.route,
+                title: 'Distancia estimada',
+                value:
+                    '${offer.estimatedDistanceKm!.toStringAsFixed(1)} km'
+                    '${offer.estimatedTimeMin != null ? ' · ${offer.estimatedTimeMin} min' : ''}',
+                iconColor: AppColors.info,
               ),
+            ],
+            const SizedBox(height: 16),
+            Row(
+              children: [
+                Expanded(
+                  child: OutlinedButton(
+                    onPressed: _busy ? null : _reject,
+                    style: OutlinedButton.styleFrom(
+                      foregroundColor: AppColors.error,
+                      side: const BorderSide(color: AppColors.error),
+                    ),
+                    child: const Text('Rechazar'),
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  flex: 2,
+                  child: ElevatedButton(
+                    onPressed: _busy ? null : _accept,
+                    child: _busy
+                        ? const SizedBox(
+                            width: 18,
+                            height: 18,
+                            child: CircularProgressIndicator(strokeWidth: 2),
+                          )
+                        : const Text('Aceptar Pedido'),
+                  ),
+                ),
+              ],
             ),
           ],
         ),

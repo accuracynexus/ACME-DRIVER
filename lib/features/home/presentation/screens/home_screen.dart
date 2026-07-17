@@ -1,45 +1,97 @@
+import 'package:badges/badges.dart' as badges;
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import '../../../../core/constants/app_colors.dart';
-import '../../../../core/router/app_router.dart';
 import '../../../../core/extensions/extensions.dart';
+import '../../../../core/router/app_router.dart';
+import '../../../../shared/widgets/common_widgets.dart';
 import '../../../auth/domain/entities/driver_profile.dart';
 import '../../../auth/presentation/providers/auth_provider.dart';
-import '../../../../shared/widgets/common_widgets.dart';
+import '../../../earnings/presentation/providers/earnings_provider.dart';
+import '../../../notifications/presentation/providers/notification_provider.dart';
+import '../../../orders/presentation/providers/order_provider.dart';
 
-class HomeScreen extends ConsumerWidget {
+class HomeScreen extends ConsumerStatefulWidget {
   const HomeScreen({super.key});
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<HomeScreen> createState() => _HomeScreenState();
+}
+
+class _HomeScreenState extends ConsumerState<HomeScreen> {
+  bool _toggling = false;
+
+  Future<void> _toggleOnline(DriverProfile driver) async {
+    if (!driver.isVerified) {
+      context.showSnackBar('Tu cuenta requiere aprobación del administrador',
+          isError: true);
+      return;
+    }
+    setState(() => _toggling = true);
+    try {
+      await ref.read(currentDriverProvider.notifier).toggleOnline();
+    } catch (e) {
+      if (mounted) context.showSnackBar('$e', isError: true);
+    } finally {
+      if (mounted) setState(() => _toggling = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
     final authState = ref.watch(currentDriverProvider);
+    final unread = ref.watch(unreadNotificationsCountProvider);
+    final offers = ref.watch(offersProvider).value ?? [];
+    final activeOrder = ref.watch(activeOrderProvider).value;
 
     return Scaffold(
       appBar: AppBar(
         title: const Text('Inicio'),
         actions: [
           IconButton(
-            icon: const Icon(Icons.notifications_outlined),
-            onPressed: () {},
+            icon: badges.Badge(
+              showBadge: unread > 0,
+              badgeContent: Text(
+                '$unread',
+                style: const TextStyle(color: Colors.white, fontSize: 10),
+              ),
+              child: const Icon(Icons.notifications_outlined),
+            ),
+            onPressed: () => context.go(AppRoutes.notifications),
           ),
         ],
       ),
       body: authState.when(
         data: (driver) {
-          if (driver == null) return const Center(child: Text('Error: No driver profile found'));
-          
+          if (driver == null) {
+            return const Center(child: Text('No se encontró el perfil'));
+          }
+
           return RefreshIndicator(
             onRefresh: () async {
-              // Add refresh logic here
+              await ref.read(currentDriverProvider.notifier).refresh();
+              ref.invalidate(offersProvider);
+              ref.invalidate(orderHistoryProvider);
+              ref.invalidate(notificationsProvider);
             },
             child: ListView(
               padding: const EdgeInsets.all(16),
               children: [
-                _buildHeader(driver.fullName),
+                _buildHeader(driver),
                 const SizedBox(height: 24),
-                const SizedBox(height: 24),
-                _buildStatusCard(context, ref, driver),
+                _buildStatusCard(driver),
+                if (!driver.isVerified) ...[
+                  const SizedBox(height: 12),
+                  _buildVerificationBanner(),
+                ],
+                if (activeOrder != null) ...[
+                  const SizedBox(height: 16),
+                  _buildActiveOrderBanner(activeOrder.code),
+                ] else if (offers.isNotEmpty) ...[
+                  const SizedBox(height: 16),
+                  _buildOffersBanner(offers.length),
+                ],
                 const SizedBox(height: 24),
                 SectionHeader(
                   title: 'Resumen de hoy',
@@ -49,11 +101,9 @@ class HomeScreen extends ConsumerWidget {
                 const SizedBox(height: 16),
                 _buildSummaryCards(),
                 const SizedBox(height: 24),
-                SectionHeader(
-                  title: 'Acciones rápidas',
-                ),
+                const SectionHeader(title: 'Acciones rápidas'),
                 const SizedBox(height: 16),
-                _buildQuickActions(context),
+                _buildQuickActions(),
               ],
             ),
           );
@@ -64,7 +114,7 @@ class HomeScreen extends ConsumerWidget {
     );
   }
 
-  Widget _buildHeader(String name) {
+  Widget _buildHeader(DriverProfile driver) {
     return Row(
       children: [
         const CircleAvatar(
@@ -73,32 +123,41 @@ class HomeScreen extends ConsumerWidget {
           child: Icon(Icons.person, color: Colors.white),
         ),
         const SizedBox(width: 16),
-        Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            const Text(
-              'Hola,',
-              style: TextStyle(fontSize: 14, color: AppColors.textSecondary),
-            ),
-            Text(
-              name,
-              style: const TextStyle(
-                fontSize: 20,
-                fontWeight: FontWeight.w700,
-                color: AppColors.textPrimary,
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text(
+                'Hola,',
+                style:
+                    TextStyle(fontSize: 14, color: AppColors.textSecondary),
               ),
-            ),
-          ],
+              Text(
+                driver.fullName,
+                style: const TextStyle(
+                  fontSize: 20,
+                  fontWeight: FontWeight.w700,
+                  color: AppColors.textPrimary,
+                ),
+              ),
+            ],
+          ),
         ),
       ],
     );
   }
 
-  Widget _buildStatusCard(BuildContext context, WidgetRef ref, DriverProfile driver) {
-    final isOnline = driver.status == DriverStatus.available;
-    final statusColor = isOnline ? AppColors.success : Colors.grey;
+  Widget _buildStatusCard(DriverProfile driver) {
+    final isOnline = driver.isOnline;
+    final statusColor = isOnline
+        ? (driver.status == DriverStatus.busy
+            ? AppColors.warning
+            : AppColors.success)
+        : Colors.grey;
     final statusText = isOnline
-        ? 'Disponible para recibir pedidos'
+        ? (driver.status == DriverStatus.busy
+            ? 'En una entrega'
+            : 'Disponible para recibir pedidos')
         : 'Desconectado - No recibirás pedidos';
 
     return Card(
@@ -117,12 +176,10 @@ class HomeScreen extends ConsumerWidget {
                     const Text(
                       'Mi estado',
                       style: TextStyle(
-                        fontSize: 16,
-                        fontWeight: FontWeight.bold,
-                      ),
+                          fontSize: 16, fontWeight: FontWeight.bold),
                     ),
                     Text(
-                      isOnline ? 'En línea' : 'Fuera de línea',
+                      isOnline ? driver.status.label : 'Fuera de línea',
                       style: TextStyle(
                         fontSize: 14,
                         color: statusColor,
@@ -131,19 +188,20 @@ class HomeScreen extends ConsumerWidget {
                     ),
                   ],
                 ),
-                Switch.adaptive(
-                  value: isOnline,
-                  activeColor: AppColors.primary,
-                  onChanged: (val) {
-                    if (!driver.isActive) {
-                      context.showSnackBar(
-                          'Tu cuenta requiere aprobación del administrador',
-                          isError: true);
-                      return;
-                    }
-                    ref.read(currentDriverProvider.notifier).toggleStatus();
-                  },
-                ),
+                _toggling
+                    ? const Padding(
+                        padding: EdgeInsets.all(12),
+                        child: SizedBox(
+                          width: 20,
+                          height: 20,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        ),
+                      )
+                    : Switch.adaptive(
+                        value: isOnline,
+                        activeColor: AppColors.primary,
+                        onChanged: (_) => _toggleOnline(driver),
+                      ),
               ],
             ),
             const Divider(height: 24),
@@ -176,13 +234,60 @@ class HomeScreen extends ConsumerWidget {
     );
   }
 
+  Widget _buildVerificationBanner() {
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: AppColors.warning.withOpacity(0.1),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: AppColors.warning.withOpacity(0.4)),
+      ),
+      child: const Row(
+        children: [
+          Icon(Icons.hourglass_top, color: AppColors.warning, size: 20),
+          SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              'Tu cuenta está en revisión. Podrás conectarte cuando sea aprobada.',
+              style: TextStyle(fontSize: 12, color: AppColors.textSecondary),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildActiveOrderBanner(String code) {
+    return _Banner(
+      color: AppColors.accent,
+      icon: Icons.motorcycle,
+      text: 'Tienes una entrega en curso ($code)',
+      actionLabel: 'Ver mapa',
+      onTap: () => context.go(AppRoutes.activeOrder),
+    );
+  }
+
+  Widget _buildOffersBanner(int count) {
+    return _Banner(
+      color: AppColors.primary,
+      icon: Icons.delivery_dining,
+      text: count == 1
+          ? 'Tienes 1 oferta de pedido esperando'
+          : 'Tienes $count ofertas de pedido esperando',
+      actionLabel: 'Ver ofertas',
+      onTap: () => context.go(AppRoutes.availableOrders),
+    );
+  }
+
   Widget _buildSummaryCards() {
+    final summary = ref.watch(earningsSummaryProvider).value ??
+        const EarningsSummary();
     return Row(
       children: [
         Expanded(
           child: _SummaryCard(
             title: 'Entregas',
-            value: '4',
+            value: '${summary.todayDeliveries}',
             icon: Icons.delivery_dining,
             color: Colors.blue,
           ),
@@ -191,7 +296,7 @@ class HomeScreen extends ConsumerWidget {
         Expanded(
           child: _SummaryCard(
             title: 'Ganancias',
-            value: 'S/ 45.00',
+            value: summary.today.toCurrency,
             icon: Icons.attach_money,
             color: Colors.green,
           ),
@@ -200,20 +305,22 @@ class HomeScreen extends ConsumerWidget {
     );
   }
 
-  Widget _buildQuickActions(BuildContext context) {
+  Widget _buildQuickActions() {
     return Column(
       children: [
         ListTile(
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+          shape:
+              RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
           tileColor: AppColors.surface,
           leading: const Icon(Icons.list_alt, color: AppColors.primary),
-          title: const Text('Ver pedidos disponibles'),
+          title: const Text('Ver ofertas de pedidos'),
           trailing: const Icon(Icons.chevron_right),
           onTap: () => context.go(AppRoutes.availableOrders),
         ),
         const SizedBox(height: 8),
         ListTile(
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+          shape:
+              RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
           tileColor: AppColors.surface,
           leading: const Icon(Icons.map, color: AppColors.primary),
           title: const Text('Mi pedido activo'),
@@ -221,6 +328,59 @@ class HomeScreen extends ConsumerWidget {
           onTap: () => context.go(AppRoutes.activeOrder),
         ),
       ],
+    );
+  }
+}
+
+class _Banner extends StatelessWidget {
+  final Color color;
+  final IconData icon;
+  final String text;
+  final String actionLabel;
+  final VoidCallback onTap;
+
+  const _Banner({
+    required this.color,
+    required this.icon,
+    required this.text,
+    required this.actionLabel,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(12),
+      child: Container(
+        padding: const EdgeInsets.all(12),
+        decoration: BoxDecoration(
+          color: color.withOpacity(0.1),
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: color.withOpacity(0.4)),
+        ),
+        child: Row(
+          children: [
+            Icon(icon, color: color),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Text(
+                text,
+                style: const TextStyle(
+                    fontSize: 13, fontWeight: FontWeight.w600),
+              ),
+            ),
+            Text(
+              actionLabel,
+              style: TextStyle(
+                fontSize: 13,
+                fontWeight: FontWeight.w700,
+                color: color,
+              ),
+            ),
+          ],
+        ),
+      ),
     );
   }
 }
@@ -253,7 +413,7 @@ class _SummaryCard extends StatelessWidget {
             Text(
               value,
               style: TextStyle(
-                fontSize: 24,
+                fontSize: 22,
                 fontWeight: FontWeight.w700,
                 color: color,
               ),

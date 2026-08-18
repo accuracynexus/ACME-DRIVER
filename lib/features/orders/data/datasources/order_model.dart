@@ -16,6 +16,7 @@ class DeliveryOrderModel extends DeliveryOrder {
     super.paymentStatus,
     super.paymentMethodCode,
     super.paymentMethodName,
+    super.paymentIsOnline,
     super.specialInstructions,
     super.placedAt,
     required super.branchName,
@@ -61,6 +62,8 @@ class DeliveryOrderModel extends DeliveryOrder {
       paymentMethodName: (order['payment_method']
               as Map<String, dynamic>?)?['name'] as String? ??
           '',
+      paymentIsOnline: (order['payment_method']
+          as Map<String, dynamic>?)?['is_online'] as bool?,
       specialInstructions: order['special_instructions'] as String?,
       placedAt: _date(order['placed_at']),
       branchName: branch['name'] as String? ?? 'Local',

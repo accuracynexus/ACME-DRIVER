@@ -17,6 +17,7 @@ import '../../../../core/services/route_service.dart';
 import '../../../../shared/widgets/common_widgets.dart';
 import '../../domain/entities/order.dart';
 import '../providers/order_provider.dart';
+import '../widgets/payment_banner.dart';
 
 class ActiveOrderScreen extends ConsumerStatefulWidget {
   const ActiveOrderScreen({super.key});
@@ -114,6 +115,19 @@ class _ActiveOrderScreenState extends ConsumerState<ActiveOrderScreen> {
         : LatLng(order.branchLat, order.branchLng);
   }
 
+  String _paymentReminder(DeliveryOrder order) {
+    switch (order.paymentAction) {
+      case PaymentAction.collectOnDelivery:
+        return '💵 COBRA ${order.total.toCurrency}'
+            '${order.paymentMethodName.isNotEmpty ? ' (${order.paymentMethodName})' : ''}.';
+      case PaymentAction.paidOnline:
+      case PaymentAction.alreadyPaid:
+        return '✅ Ya está pagado: no cobres nada.';
+      case PaymentAction.unconfirmed:
+        return '⚠️ Sin método de pago registrado: no cobres sin confirmar con soporte.';
+    }
+  }
+
   Future<void> _advance(DeliveryOrder order) async {
     final next = order.status.next;
     if (next == null) return;
@@ -126,8 +140,10 @@ class _ActiveOrderScreenState extends ConsumerState<ActiveOrderScreen> {
         builder: (ctx) => AlertDialog(
           title: const Text('Confirmar entrega'),
           content: Text(
-              '¿Entregaste el pedido ${order.code} a ${order.recipientName}?\n\n'
-              'Puedes tomar una foto como evidencia de la entrega.'),
+            '¿Entregaste el pedido ${order.code} a ${order.recipientName}?\n\n'
+            '${_paymentReminder(order)}\n'
+            'Puedes tomar una foto como evidencia de la entrega.',
+          ),
           actions: [
             TextButton(
               onPressed: () => Navigator.pop(ctx),
@@ -779,49 +795,20 @@ class _DetailsContent extends StatelessWidget {
           ),
         ],
         const Divider(height: 24),
-        Container(
-          padding: const EdgeInsets.all(12),
-          decoration: BoxDecoration(
-            color: order.mustCollectPayment
-                ? AppColors.warning.withOpacity(0.1)
-                : AppColors.success.withOpacity(0.1),
-            borderRadius: BorderRadius.circular(12),
-            border: Border.all(
-              color: order.mustCollectPayment
-                  ? AppColors.warning.withOpacity(0.5)
-                  : AppColors.success.withOpacity(0.5),
+        Row(
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          children: [
+            const Text('Total del pedido',
+                style: TextStyle(fontWeight: FontWeight.w600)),
+            Text(
+              order.total.toCurrency,
+              style: const TextStyle(
+                  fontWeight: FontWeight.w700, fontSize: 16),
             ),
-          ),
-          child: Row(
-            children: [
-              Icon(
-                order.mustCollectPayment
-                    ? Icons.payments_outlined
-                    : Icons.check_circle_outline,
-                color: order.mustCollectPayment
-                    ? AppColors.warning
-                    : AppColors.success,
-              ),
-              const SizedBox(width: 10),
-              Expanded(
-                child: Text(
-                  order.mustCollectPayment
-                      ? 'COBRAR al cliente'
-                          '${order.paymentMethodName.isNotEmpty ? ' (${order.paymentMethodName})' : ''}'
-                      : 'Pedido PAGADO — no cobrar'
-                          '${order.paymentMethodName.isNotEmpty ? ' (${order.paymentMethodName})' : ''}',
-                  style: const TextStyle(
-                      fontWeight: FontWeight.w700, fontSize: 13),
-                ),
-              ),
-              Text(
-                order.mustCollectPayment ? order.total.toCurrency : '',
-                style: const TextStyle(
-                    fontWeight: FontWeight.w700, fontSize: 16),
-              ),
-            ],
-          ),
+          ],
         ),
+        const SizedBox(height: 10),
+        PaymentBanner(order: order),
         Row(
           mainAxisAlignment: MainAxisAlignment.spaceBetween,
           children: [

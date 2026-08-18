@@ -17,6 +17,11 @@ class DeliveryOrder extends Equatable {
   final String paymentStatus; // pending, paid, ...
   final String paymentMethodCode; // cash, yape, plin, card_online, card_pos
   final String paymentMethodName;
+
+  /// `payment_methods.is_online`: true = se cobra por Culqi antes de la
+  /// entrega; false = contra entrega. `null` = el pedido no tiene método
+  /// registrado, así que no se puede afirmar nada.
+  final bool? paymentIsOnline;
   final String? specialInstructions;
   final DateTime? placedAt;
 
@@ -53,6 +58,7 @@ class DeliveryOrder extends Equatable {
     this.paymentStatus = 'pending',
     this.paymentMethodCode = '',
     this.paymentMethodName = '',
+    this.paymentIsOnline,
     this.specialInstructions,
     this.placedAt,
     required this.branchName,
@@ -72,15 +78,61 @@ class DeliveryOrder extends Equatable {
 
   String get code => '#$orderCode';
 
-  /// El repartidor debe cobrar al entregar (pago contra entrega no pagado).
+  /// Qué debe hacer el repartidor con el dinero de este pedido.
+  ///
+  /// Solo se cobra cuando el método es explícitamente contra entrega
+  /// (`is_online = false`: efectivo o tarjeta POS) y el pedido aún no figura
+  /// pagado. Cualquier otro caso NO se cobra: los métodos en línea se pagan
+  /// por Culqi antes de la entrega, y un pedido sin método registrado se
+  /// marca para verificar en vez de cobrarlo, porque cobrar un pedido ya
+  /// pagado le cuesta el doble al cliente.
+  PaymentAction get paymentAction {
+    if (paymentStatus == 'paid') return PaymentAction.alreadyPaid;
+    if (paymentIsOnline == false) return PaymentAction.collectOnDelivery;
+    if (paymentIsOnline == true) return PaymentAction.paidOnline;
+    return PaymentAction.unconfirmed;
+  }
+
   bool get mustCollectPayment =>
-      paymentStatus != 'paid' && paymentMethodCode != 'card_online';
+      paymentAction == PaymentAction.collectOnDelivery;
 
   bool get hasCoordinates =>
       (branchLat != 0 || branchLng != 0) && (deliveryLat != 0 || deliveryLng != 0);
 
   @override
   List<Object?> get props => [assignmentId, orderId, status, assignmentStatus];
+}
+
+/// Qué hace el repartidor con el cobro al entregar.
+enum PaymentAction {
+  /// Contra entrega (efectivo / tarjeta POS): hay que cobrar el total.
+  collectOnDelivery,
+
+  /// Método en línea (Culqi): el cliente ya pagó al hacer el pedido.
+  paidOnline,
+
+  /// El pedido figura pagado en la base de datos.
+  alreadyPaid,
+
+  /// El pedido no tiene método de pago registrado: no cobrar sin confirmar.
+  unconfirmed,
+}
+
+extension PaymentActionX on PaymentAction {
+  bool get requiresCollection => this == PaymentAction.collectOnDelivery;
+
+  String get shortLabel {
+    switch (this) {
+      case PaymentAction.collectOnDelivery:
+        return 'Cobrar';
+      case PaymentAction.paidOnline:
+        return 'Pagado en línea';
+      case PaymentAction.alreadyPaid:
+        return 'Pagado';
+      case PaymentAction.unconfirmed:
+        return 'Verificar pago';
+    }
+  }
 }
 
 class OrderItem extends Equatable {

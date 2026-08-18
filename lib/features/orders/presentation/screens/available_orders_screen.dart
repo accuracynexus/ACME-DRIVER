@@ -9,6 +9,7 @@ import '../../../../shared/widgets/common_widgets.dart';
 import '../../../auth/presentation/providers/auth_provider.dart';
 import '../../domain/entities/order.dart';
 import '../providers/order_provider.dart';
+import '../widgets/payment_banner.dart';
 
 class AvailableOrdersScreen extends ConsumerWidget {
   const AvailableOrdersScreen({super.key});
@@ -154,20 +155,8 @@ class _OfferCardState extends ConsumerState<_OfferCard> {
                 iconColor: AppColors.info,
               ),
             ],
-            const SizedBox(height: 8),
-            InfoTile(
-              icon: offer.mustCollectPayment
-                  ? Icons.payments_outlined
-                  : Icons.check_circle_outline,
-              title: 'Pago',
-              value: offer.mustCollectPayment
-                  ? 'Cobrar ${offer.total.toCurrency}'
-                      '${offer.paymentMethodName.isNotEmpty ? ' · ${offer.paymentMethodName}' : ''}'
-                  : 'Pagado online — no cobrar',
-              iconColor: offer.mustCollectPayment
-                  ? AppColors.warning
-                  : AppColors.success,
-            ),
+            const SizedBox(height: 12),
+            PaymentBanner(order: offer, compact: true),
             const SizedBox(height: 16),
             Row(
               children: [

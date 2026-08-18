@@ -7,12 +7,27 @@ App Flutter para repartidores del ecosistema ACME PEDIDOS, conectada a Supabase.
 - **Auth**: login / registro multi-paso (crea el perfil con el RPC `register_driver`), recuperación de contraseña. Solo permite cuentas con rol `driver`.
 - **Estado del repartidor**: toggle en línea / fuera de línea (`driver_set_online`). Mientras está en línea la app envía la ubicación cada 10 s (`driver_ping_location`).
 - **Ofertas de pedidos**: los pedidos que el backend asigna (`order_assignments` en estado `assigned`) aparecen en la pestaña Pedidos y generan una notificación local en el dispositivo. Se pueden aceptar (`driver_accept_assignment`) o rechazar (`driver_reject_assignment`).
-- **Entrega activa estilo courier**: mapa a pantalla completa (OpenStreetMap vía flutter_map, sin API key) con posición del repartidor en vivo (GPS cada 5 m, marcador que rota según el rumbo), modo *seguir mi posición* (se desactiva al mover el mapa a mano, botón para reactivar), **ruta real por calles** con distancia y ETA (OSRM público, con fallback a línea recta), chip de fase (hacia el local / hacia el cliente) con velocidad, botón "ver todo el recorrido", apertura en Google Maps, llamadas al local y al cliente, panel deslizable con stepper de progreso, productos e indicación clara de **cobro** (monto y método si es contra entrega, o "pagado — no cobrar"). Avance de estados: `driver_accepted → picked_up → on_the_way → delivered` (`driver_advance_order_status`) con confirmación antes de marcar entregado. Durante la entrega el ping de ubicación sube a cada 5 s para que el rastreo del cliente en la web sea fluido.
+- **Entrega activa estilo courier**: mapa a pantalla completa (OpenStreetMap vía flutter_map, sin API key) con posición del repartidor en vivo (GPS cada 5 m, marcador que rota según el rumbo), modo *seguir mi posición* (se desactiva al mover el mapa a mano, botón para reactivar), **ruta real por calles** con distancia y ETA (OSRM público, con fallback a línea recta), chip de fase (hacia el local / hacia el cliente) con velocidad, botón "ver todo el recorrido", apertura en Google Maps, llamadas al local y al cliente, panel deslizable con stepper de progreso, productos e indicación clara de **cobro** (ver abajo). Avance de estados: `driver_accepted → picked_up → on_the_way → delivered` (`driver_advance_order_status`) con confirmación antes de marcar entregado. Durante la entrega el ping de ubicación sube a cada 5 s para que el rastreo del cliente en la web sea fluido.
 - **Historial**: entregas completadas/canceladas desde `order_assignments`.
 - **Ganancias**: resumen hoy / semana / total (suma de `delivery_fee` de entregas completadas) + liquidaciones (`driver_settlements`).
 - **Notificaciones in-app**: lista desde la tabla `notifications` con marcar leído y badge de no leídas.
 - **Chat del pedido**: conversación con cliente/comercio/soporte (`get_or_create_order_conversation` + `messages`), burbujas por rol, confirmaciones de lectura (`message_reads`), polling 4 s + realtime oportunista. Accesible desde el botón de chat en el mapa de la entrega activa.
 - **Foto de evidencia de entrega**: al confirmar la entrega puedes tomar una foto (cámara); se sube al bucket `driver-documents` (carpeta del driver, permitida por RLS), se genera URL firmada de 5 años y se registra en `order_evidences` (visible en la galería del admin web).
+
+## Cobro: cuándo el repartidor toca el dinero
+
+La app decide leyendo `payment_methods.is_online`, y **solo manda cobrar cuando el método es explícitamente contra entrega y el pedido no figura pagado**:
+
+| Situación | Qué ve el repartidor |
+|---|---|
+| `is_online = false` (Efectivo, Tarjeta POS) y sin pagar | **COBRAR S/ X** |
+| `is_online = true` (Tarjeta online, Yape, Plin) | Pagado en línea — no cobrar |
+| `payment_status = 'paid'` | Pagado — no cobrar |
+| Pedido sin método registrado | Pago sin confirmar — no cobres, consulta soporte |
+
+Ante la duda nunca se cobra: cobrar un pedido ya pagado por Culqi le cuesta el doble al cliente. La regla está cubierta por `test/payment_action_test.dart` y se puede auditar contra los pedidos reales con `node scripts/audit-payments.js`.
+
+⚠️ Como la app confía en `is_online`, ese campo tiene que reflejar la realidad. Hoy `plin` está marcado `is_online = true` pero el checkout de Culqi no lo soporta: esos pedidos se mostrarían como pagados y nadie los cobraría. Ver [`scripts/sql/2026-08-16-disable-cash.sql`](scripts/sql/2026-08-16-disable-cash.sql).
 
 ## Nota sobre ofertas
 
@@ -34,7 +49,11 @@ Requieren `npm install` y el `.env` con `SUPABASE_SERVICE_ROLE_KEY`:
 
 - `node scripts/seed-test-order.js` — crea un pedido de prueba cerca del driver de prueba y lo despacha (genera la oferta). Úsalo para probar el flujo completo en la app.
 - `node scripts/verify-e2e.js` — verificación integral: recorre login → online → oferta → aceptar → chat → estados → evidencia → entrega → historial con las mismas consultas que usa la app, y deja una oferta fresca lista.
+- `node scripts/audit-payments.js` — muestra, pedido real por pedido real, qué decide la app sobre el cobro.
+- `node scripts/cleanup-test-orders.js [--dry-run]` — cancela los pedidos de prueba que queden vivos (solo toca los marcados como prueba).
 - `node scripts/dev-probe.js` / `dev-probe2.js` / `dev-probe3.js` / `dev-probe4.js` — diagnósticos del backend (RPCs, RLS, realtime, storage).
+
+Tests: `flutter test`
 
 Driver de prueba: `driver.test@acme.dev` / `AcmeDriver123!`
 

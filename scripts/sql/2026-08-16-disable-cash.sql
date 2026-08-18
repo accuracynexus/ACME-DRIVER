@@ -60,34 +60,53 @@ commit;
 --    transferencia al repartidor, va como is_online = false, no como true.
 --
 -- ============================================================================
--- LO QUE ESTE SCRIPT NO ARREGLA (vive en ACME-WEB, no en este repo)
+-- DÓNDE VIVE EL COBRO (verificado el 2026-08-18)
 -- ============================================================================
 --
--- 1. TODO PEDIDO SE CREA CON payment_method_id = NULL.
---    · create_order_from_quote declara p_payment_method_id uuid DEFAULT NULL
---      (supabase/migrations/202606230001_fix_create_order_from_quote_enum_cast.sql:13)
---      e inserta lo que reciba.
---    · El frontend nunca lo manda: CourierCreateOrderRequest
---      (src/core/services/courierPaymentService.ts:128) solo lleva quote_id,
---      fulfillment_type, special_instructions, recipient_name,
---      recipient_phone y address. No hay campo de método de pago.
---    · Resultado en la BD: los pedidos #1017–#1021 (2026-08-12) tienen
---      payment_method_id NULL y quedaron en status 'placed'.
+-- El backend de pagos NO está en ACME-WEB: es un proyecto aparte en Vercel.
+--   · Repo:      github.com/gcpaccori/ACME-OPERACIONE  (FastAPI / Python)
+--   · Desplegado: https://acme-operacione.vercel.app   (/health responde ok)
+--   · ACME-WEB lo llama con VITE_ACME_API_URL, que por defecto apunta ahí
+--     (src/core/services/courierPaymentService.ts:3).
+--   Las 4 rutas que usa el frontend existen en el backend y coinciden:
+--     /api/courier/quote · /api/courier/orders
+--     /api/courier/payments/order · /api/courier/payments/charge
 --
--- 2. EL COBRO DE CULQI NO SE REGISTRA.
---    · La tabla `payments` está vacía.
---    · En `payment_attempts` hay una sola fila en toda la BD
---      (chr_test_7uzitCj8zp93g4MG, 'paid', 2026-06-26). Para #1017–#1021 no
---      hay ni un intento: el checkout creó el pedido y nunca llegó a cobrar.
---    · Nada mueve orders.payment_status a 'paid'.
+-- El circuito de cobro está COMPLETO y es correcto:
+--   1. POST /api/courier/orders crea el pedido SIN método de pago. Es a
+--      propósito: todavía no se sabe con qué va a pagar el cliente
+--      (services_courier_orders.py, order_payload).
+--   2. POST /api/courier/payments/order resuelve el método con
+--      get_online_payment_method_id() y llama a update_order_payment(...,
+--      payment_status="pending"), que es lo que rellena
+--      orders.payment_method_id (routes_courier_payments.py:107-118).
+--   3. POST /api/courier/payments/charge marca 'paid' o 'failed' y actualiza
+--      payments, payment_transactions y el pedido de forma síncrona
+--      (routes_courier_payments.py:216-253). El webhook /api/webhooks/culqi
+--      es respaldo, no la vía principal.
 --
--- 3. LOS ENDPOINTS DEL CHECKOUT NO ESTÁN EN EL REPO.
---    El frontend llama a /api/courier/orders, /api/courier/quotes y
---    /api/courier/payments/*, pero `git ls-tree HEAD api/` en ACME-WEB solo
---    devuelve customer-addresses.ts y manage-merchant-access.ts. Además
---    vercel.json reescribe /(.*) a /index.html, así que una ruta /api que no
---    exista como función devuelve el HTML de la SPA en vez de JSON.
---    Hasta que ese backend esté versionado no se puede arreglar el punto 1.
+-- Entonces payment_method_id = NULL no es un bug del backend: significa que
+-- ese pedido nunca pasó del paso 1. Los #1017–#1021 (2026-08-12) se quedaron
+-- ahí, y por eso no tienen ni una fila en payments ni en payment_attempts.
+--
+-- ⚠️ EL PROBLEMA REAL ES DE CONFIGURACIÓN, NO DE CÓDIGO:
+--    El bundle desplegado de ACME-WEB (assets/index-*.js) trae una llave
+--    'pk_test' de Culqi — modo sandbox — y ninguna 'pk_live'. El único cobro
+--    que existe en toda la BD es de sandbox (chr_test_7uzitCj8zp93g4MG, con
+--    statement_descriptor "GICPACCORI DEV"). Con llaves de prueba no entra
+--    dinero real por más que el circuito funcione.
+--    Para cobrar de verdad hay que poner en Vercel las credenciales de
+--    producción: VITE_CULQI_PUBLIC_KEY (pk_live) y, en ACME-OPERACIONE,
+--    CULQI_PRIVATE_KEY (sk_live) — más VITE_CULQI_RSA_ID y
+--    VITE_CULQI_RSA_PUBLIC_KEY si se quiere cobro con tarjeta.
+--
+-- ✅ ESTE SCRIPT ES COMPATIBLE CON ESE BACKEND:
+--    get_online_payment_method_id() (services_courier_payments.py:103) filtra
+--    is_active = true AND is_online = true y prefiere, en orden: culqi,
+--    culqi_online, card_online, yape. Al desactivar cash, card_pos y plin
+--    siguen quedando card_online y yape, así que la función sigue resolviendo
+--    y el cobro no se ve afectado. Ojo: si algún día se desactivan también
+--    card_online y yape, esa función devuelve None y el pago se rompe.
 --
 -- Mientras tanto, la app del repartidor está protegida: un pedido sin método
 -- registrado se le muestra como "Pago sin confirmar — no cobres" en vez de

@@ -89,16 +89,24 @@ commit;
 -- ese pedido nunca pasó del paso 1. Los #1017–#1021 (2026-08-12) se quedaron
 -- ahí, y por eso no tienen ni una fila en payments ni en payment_attempts.
 --
--- ⛔ BLOQUEO 1 (resuelto el 2026-08-18): CORS.
+-- ⛔ BLOQUEO 1 (diagnosticado, SIN aplicar): CORS.
 --    El checkout se mudó a https://www.acmepedidos.com, pero el backend solo
 --    permitía *.vercel.app y lo que trajera FRONTEND_URLS. Toda llamada del
 --    navegador moría en la preflight sin cabecera Access-Control-Allow-Origin,
 --    empezando por /api/courier/quote, que es el primer paso del checkout:
 --    sin cotización no hay pedido y sin pedido no hay cobro. Eso explica que
 --    no haya pedidos nuevos después del 2026-08-12.
---    Corregido en ACME-OPERACIONE (main.py): los dominios propios van en el
---    código y el regex cubre subdominios propios además de las previews de
---    Vercel, anclado porque allow_credentials está activo.
+--    La forma SEGURA de arreglarlo es sin tocar código: el backend ya lee la
+--    variable FRONTEND_URLS y la suma a los orígenes permitidos
+--    (main.py, allowed_origins()). Basta con ponerla en Vercel:
+--      FRONTEND_URLS=https://www.acmepedidos.com,https://acmepedidos.com
+--
+--    ⚠️ El 2026-08-18 intenté arreglarlo por código y el despliegue resultante
+--    dejó el backend devolviendo 404 en TODAS las rutas, incluidas / y /health.
+--    Revertí el commit y el 404 siguió, así que el defecto no era ese cambio:
+--    el build actual de Vercel está roto de por sí (la app importa bien en
+--    local y registra sus 21 rutas). Hasta que se restaure un despliegue bueno
+--    desde el panel de Vercel, la API de pagos está caída.
 --
 -- ⚠️ BLOQUEO 2 (pendiente): LAS LLAVES DE CULQI SON DE PRUEBA.
 --    El bundle desplegado de ACME-WEB (assets/index-*.js) trae una llave

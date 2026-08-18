@@ -1,5 +1,9 @@
 // Creates a test order near the test driver and dispatches it.
-// Usage: node scripts/seed-test-order.js [--no-dispatch]
+// Usage: node scripts/seed-test-order.js [--no-dispatch] [--method=<code>]
+//
+// El método por defecto es card_online porque el checkout real (Culqi) solo
+// ofrece tarjeta/Yape/billeteras. Para probar la ruta de cobro contra entrega:
+//   node scripts/seed-test-order.js --method=cash
 const { createClient } = require('@supabase/supabase-js');
 require('dotenv').config({ path: './.env' });
 
@@ -9,7 +13,19 @@ async function main() {
   const { data: branch } = await admin.from('merchant_branches')
     .select('id,merchant_id,name,lat,lng').eq('name', 'Jugueria La Bahia de Ada').single();
   const { data: customer } = await admin.from('customers').select('user_id').limit(1).single();
-  const { data: pm } = await admin.from('payment_methods').select('id').eq('code', 'cash').single();
+  const methodCode =
+    (process.argv.find((a) => a.startsWith('--method=')) || '').split('=')[1] ||
+    'card_online';
+  const { data: pm } = await admin
+    .from('payment_methods')
+    .select('id, code, is_online')
+    .eq('code', methodCode)
+    .single();
+  if (!pm) {
+    console.error(`No existe el método de pago '${methodCode}'`);
+    return;
+  }
+  console.log(`método de pago: ${pm.code} (is_online=${pm.is_online})`);
   const { data: product } = await admin.from('products')
     .select('id,name,base_price').eq('merchant_id', branch.merchant_id).limit(1).maybeSingle();
 

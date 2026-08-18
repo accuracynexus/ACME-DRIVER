@@ -69,6 +69,16 @@ async function main() {
   check('Oferta trae método de pago', !!offer?.order?.payment_method?.code, offer?.order?.payment_method?.name);
   check('Oferta trae items', (offer?.order?.items?.length ?? 0) > 0);
 
+  // Regla de cobro: solo se cobra contra entrega (is_online = false) sin pagar.
+  const pm = offer?.order?.payment_method;
+  const mustCollect =
+    offer?.order?.payment_status !== 'paid' && pm?.is_online === false;
+  check(
+    `Decisión de cobro para ${pm?.code}`,
+    pm?.is_online === false ? mustCollect : !mustCollect,
+    pm?.is_online === false ? 'COBRAR (contra entrega)' : 'no cobrar (pagado en línea)'
+  );
+
   // 6. Aceptar
   const acc = await anon.rpc('driver_accept_assignment', { p_assignment_id: offer.id });
   check('driver_accept_assignment', !acc.error, acc.error?.message);

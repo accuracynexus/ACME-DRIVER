@@ -27,7 +27,7 @@ La app decide leyendo `payment_methods.is_online`, y **solo manda cobrar cuando 
 
 Ante la duda nunca se cobra: cobrar un pedido ya pagado por Culqi le cuesta el doble al cliente. La regla está cubierta por `test/payment_action_test.dart` y se puede auditar contra los pedidos reales con `node scripts/audit-payments.js`.
 
-⚠️ Como la app confía en `is_online`, ese campo tiene que reflejar la realidad. Hoy `plin` está marcado `is_online = true` pero el checkout de Culqi no lo soporta: esos pedidos se mostrarían como pagados y nadie los cobraría. Ver [`scripts/sql/2026-08-16-disable-cash.sql`](scripts/sql/2026-08-16-disable-cash.sql).
+⚠️ Como la app confía en `is_online`, ese campo tiene que reflejar la realidad. El catálogo acordado deja activos solo los métodos que Culqi cobra de verdad (`card_online` y `yape`); `cash`, `card_pos` y `plin` se desactivan con `node scripts/apply-payment-catalog.js` (reversible con `--rollback`). El detalle y las causas pendientes en el checkout están en [`scripts/sql/2026-08-16-disable-cash.sql`](scripts/sql/2026-08-16-disable-cash.sql).
 
 ## Nota sobre ofertas
 
@@ -50,6 +50,7 @@ Requieren `npm install` y el `.env` con `SUPABASE_SERVICE_ROLE_KEY`:
 - `node scripts/seed-test-order.js` — crea un pedido de prueba cerca del driver de prueba y lo despacha (genera la oferta). Úsalo para probar el flujo completo en la app.
 - `node scripts/verify-e2e.js` — verificación integral: recorre login → online → oferta → aceptar → chat → estados → evidencia → entrega → historial con las mismas consultas que usa la app, y deja una oferta fresca lista.
 - `node scripts/audit-payments.js` — muestra, pedido real por pedido real, qué decide la app sobre el cobro.
+- `node scripts/apply-payment-catalog.js [--dry-run|--rollback]` — deja activos solo los métodos que Culqi puede cobrar.
 - `node scripts/cleanup-test-orders.js [--dry-run]` — cancela los pedidos de prueba que queden vivos (solo toca los marcados como prueba).
 - `node scripts/dev-probe.js` / `dev-probe2.js` / `dev-probe3.js` / `dev-probe4.js` — diagnósticos del backend (RPCs, RLS, realtime, storage).
 

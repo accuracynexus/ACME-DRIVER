@@ -89,24 +89,32 @@ commit;
 -- ese pedido nunca pasó del paso 1. Los #1017–#1021 (2026-08-12) se quedaron
 -- ahí, y por eso no tienen ni una fila en payments ni en payment_attempts.
 --
--- ⛔ BLOQUEO 1 (diagnosticado, SIN aplicar): CORS.
+-- ✅ BLOQUEO 1 (resuelto el 2026-08-18): CORS + enrutado del backend.
 --    El checkout se mudó a https://www.acmepedidos.com, pero el backend solo
 --    permitía *.vercel.app y lo que trajera FRONTEND_URLS. Toda llamada del
 --    navegador moría en la preflight sin cabecera Access-Control-Allow-Origin,
 --    empezando por /api/courier/quote, que es el primer paso del checkout:
 --    sin cotización no hay pedido y sin pedido no hay cobro. Eso explica que
 --    no haya pedidos nuevos después del 2026-08-12.
---    La forma SEGURA de arreglarlo es sin tocar código: el backend ya lee la
---    variable FRONTEND_URLS y la suma a los orígenes permitidos
---    (main.py, allowed_origins()). Basta con ponerla en Vercel:
+--    Resuelto sin tocar el código de CORS: el backend ya lee FRONTEND_URLS y
+--    la suma a los orígenes permitidos (main.py, allowed_origins()). Se creó
+--    esa variable en el proyecto Vercel acme-operacione:
 --      FRONTEND_URLS=https://www.acmepedidos.com,https://acmepedidos.com
 --
---    ⚠️ El 2026-08-18 intenté arreglarlo por código y el despliegue resultante
---    dejó el backend devolviendo 404 en TODAS las rutas, incluidas / y /health.
---    Revertí el commit y el 404 siguió, así que el defecto no era ese cambio:
---    el build actual de Vercel está roto de por sí (la app importa bien en
---    local y registra sus 21 rutas). Hasta que se restaure un despliegue bueno
---    desde el panel de Vercel, la API de pagos está caída.
+--    Al desplegar apareció un segundo problema, más grave: el backend devolvía
+--    404 en TODAS las rutas, incluidas / y /health, aunque el middleware de
+--    CORS sí respondía. Comparando los builds salió la causa. El MISMO commit
+--    (1c84221), con el mismo preset "fastapi", emitió lambdas distintas:
+--        2026-07-03  output: type=lambda path=index
+--        2026-08-18  output: type=lambda path=fastapi
+--    vercel.json reescribía /(.*) hacia /api/index, así que cuando Vercel dejó
+--    de llamar "index" al lambda, todas las peticiones iban a algo inexistente.
+--    Producción llevaba desde el 3 de julio sin redesplegarse, por eso el fallo
+--    no se veía: seguía sirviendo el build viejo.
+--    Arreglado quitando el rewrite obsoleto de vercel.json (el preset fastapi
+--    enruta solo hacia la app ASGI). Verificado en producción: /, /health y las
+--    4 rutas del checkout responden, y la preflight desde www.acmepedidos.com
+--    y desde el apex devuelve Access-Control-Allow-Origin.
 --
 -- ⚠️ BLOQUEO 2 (pendiente): LAS LLAVES DE CULQI SON DE PRUEBA.
 --    El bundle desplegado de ACME-WEB (assets/index-*.js) trae una llave

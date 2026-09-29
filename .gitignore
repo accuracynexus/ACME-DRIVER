@@ -54,3 +54,6 @@ node_modules/
 
 # Archivos temporales de desarrollo
 tmp_*
+
+# Credenciales de build (solo claves públicas, pero fuera de Git)
+dart_defines.json

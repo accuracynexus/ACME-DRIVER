@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:intl/date_symbol_data_local.dart';
 import 'package:timeago/timeago.dart' as timeago;
 import 'core/theme/app_theme.dart';
@@ -15,7 +14,6 @@ void main() async {
   timeago.setLocaleMessages('es', timeago.EsMessages());
 
   try {
-    await dotenv.load(fileName: '.env');
     await SupabaseConfig.initialize();
   } catch (e) {
     debugPrint('Initialization error: $e');

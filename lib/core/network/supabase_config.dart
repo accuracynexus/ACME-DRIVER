@@ -1,14 +1,21 @@
-import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 class SupabaseConfig {
   SupabaseConfig._();
 
-  static String get url => dotenv.env['SUPABASE_URL'] ?? '';
-  static String get anonKey => dotenv.env['SUPABASE_ANON_KEY'] ?? '';
-  static String get serviceRoleKey => dotenv.env['SUPABASE_SERVICE_ROLE_KEY'] ?? '';
+  /// Credenciales públicas inyectadas en tiempo de compilación con
+  /// `--dart-define-from-file=dart_defines.json`. Nunca se empaquetan
+  /// secretos (service role, cadena de conexión) dentro de la app.
+  static const String url = String.fromEnvironment('SUPABASE_URL');
+  static const String anonKey = String.fromEnvironment('SUPABASE_ANON_KEY');
 
   static Future<void> initialize() async {
+    if (url.isEmpty || anonKey.isEmpty) {
+      throw StateError(
+        'Faltan SUPABASE_URL o SUPABASE_ANON_KEY. Compila con '
+        '--dart-define-from-file=dart_defines.json',
+      );
+    }
     await Supabase.initialize(
       url: url,
       anonKey: anonKey,
@@ -18,10 +25,4 @@ class SupabaseConfig {
 
   static SupabaseClient get client => Supabase.instance.client;
   static GoTrueClient get auth => Supabase.instance.client.auth;
-
-  // Admin client for direct control and SQL operations
-  static SupabaseClient get adminClient => SupabaseClient(
-    url,
-    serviceRoleKey,
-  );
 }

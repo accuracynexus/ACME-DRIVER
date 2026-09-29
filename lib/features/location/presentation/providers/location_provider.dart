@@ -40,6 +40,8 @@ final locationTrackingProvider =
 class LocationTrackingNotifier extends StateNotifier<bool> {
   final SupabaseClient _client;
   StreamSubscription<Position>? _sub;
+  Timer? _heartbeat;
+  Position? _lastPosition;
   String? _orderId;
 
   LocationTrackingNotifier(this._client) : super(false);
@@ -58,10 +60,33 @@ class LocationTrackingNotifier extends StateNotifier<bool> {
     if (!await LocationService.ensurePermission()) return;
     _sub?.cancel();
     _sub = LocationService.positionStream().listen(_onPosition);
+
+    // El stream de GPS solo emite cuando el repartidor se mueve
+    // (distanceFilter), así que uno parado esperando en la puerta del local
+    // nunca refrescaría last_seen_at y el backend lo tomaría por fantasma.
+    // El latido reenvía la última posición conocida aunque no haya movimiento.
+    _heartbeat?.cancel();
+    _heartbeat = Timer.periodic(
+      const Duration(seconds: AppConstants.presenceHeartbeatSec),
+      (_) => _sendHeartbeat(),
+    );
+    unawaited(_sendHeartbeat());
     state = true;
   }
 
   Future<void> _onPosition(Position pos) async {
+    _lastPosition = pos;
+    await _ping(pos);
+  }
+
+  Future<void> _sendHeartbeat() async {
+    final pos = _lastPosition ?? await LocationService.tryGetPosition();
+    if (pos == null) return;
+    _lastPosition = pos;
+    await _ping(pos);
+  }
+
+  Future<void> _ping(Position pos) async {
     try {
       await _client.rpc(AppConstants.rpcPingLocation, params: {
         'p_lat': pos.latitude,
@@ -79,12 +104,16 @@ class LocationTrackingNotifier extends StateNotifier<bool> {
   void stop() {
     _sub?.cancel();
     _sub = null;
+    _heartbeat?.cancel();
+    _heartbeat = null;
+    _lastPosition = null;
     state = false;
   }
 
   @override
   void dispose() {
     _sub?.cancel();
+    _heartbeat?.cancel();
     super.dispose();
   }
 }

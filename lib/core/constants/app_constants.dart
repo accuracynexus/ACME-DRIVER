@@ -44,6 +44,11 @@ class AppConstants {
 
   // ── Tuning local ──────────────────────────────────────────────
   static const int locationUpdateIntervalSec = 10;
+
+  /// Cada cuánto se reenvía la última posición conocida para mantener viva la
+  /// presencia del repartidor. Debe ser bastante menor que el timeout de
+  /// presencia del backend (dispatch_presence_timeout_seconds).
+  static const int presenceHeartbeatSec = 45;
   static const int offerTimeoutSeconds = 45;
   static const int pageSize = 20;
 }

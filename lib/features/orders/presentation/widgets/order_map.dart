@@ -128,14 +128,14 @@ class _OrderMapState extends State<OrderMap> {
               ),
               children: [
                 TileLayer(
-                  // CartoDB "Voyager": estilo claro/amigable estilo Google Maps,
-                  // gratuito y sin API key (solo requiere atribución).
-                  urlTemplate:
-                      'https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png',
-                  subdomains: const ['a', 'b', 'c', 'd'],
-                  retinaMode: RetinaMode.isHighDensity(context),
+                  // Tiles estándar de OpenStreetMap: libres y sin API key.
+                  // CartoDB dejó de servir gratis y devuelve un tile con la
+                  // marca "API KEY REQUIRED" en vez del mapa.
+                  // Sin subdominios (OSM los descontinuó) y sin {r}: OSM no
+                  // publica tiles retina @2x.
+                  urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
                   userAgentPackageName: 'com.acme.acme_driver',
-                  maxZoom: 20,
+                  maxZoom: 19,
                 ),
                 if (routePoints.length > 1)
                   PolylineLayer(
@@ -163,7 +163,7 @@ class _OrderMapState extends State<OrderMap> {
                   alignment: AttributionAlignment.bottomLeft,
                   showFlutterMapAttribution: false,
                   attributions: [
-                    TextSourceAttribution('© OpenStreetMap, © CARTO'),
+                    TextSourceAttribution('© OpenStreetMap contributors'),
                   ],
                 ),
               ],

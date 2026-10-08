@@ -11,6 +11,7 @@ import '../../../../shared/widgets/app_button.dart';
 import '../../../../shared/widgets/common_widgets.dart';
 import '../../../../shared/widgets/premium_header.dart';
 import '../../../auth/presentation/providers/auth_provider.dart';
+import '../../../earnings/presentation/providers/earnings_provider.dart';
 import '../../../location/presentation/providers/location_provider.dart';
 import '../../domain/entities/order.dart';
 import '../order_status_ui.dart';
@@ -44,14 +45,102 @@ class _ActiveOrderScreenState extends ConsumerState<ActiveOrderScreen> {
     try {
       await ref.read(activeOrderProvider.notifier).advance();
       await ref.read(currentDriverProvider.notifier).refresh();
-      if (next == OrderStatus.delivered && mounted) {
-        context.showSnackBar('¡Pedido entregado!');
+      if (next == OrderStatus.delivered) {
+        // Refresca lo que alimenta el inicio para que al volver ya se vean
+        // la entrega y la ganancia sumadas, sin tener que tirar del scroll.
+        ref.invalidate(todaySummaryProvider);
+        ref.invalidate(settlementsProvider);
+        ref.invalidate(orderHistoryProvider);
+        if (mounted) await _showDeliveredDialog(order);
       }
     } catch (e) {
       if (mounted) context.showSnackBar(e.toString(), isError: true);
     } finally {
       if (mounted) setState(() => _busy = false);
     }
+  }
+
+  /// Confirmación de entrega: resume lo ganado y devuelve al menú.
+  Future<void> _showDeliveredDialog(Order order) async {
+    await showDialog<void>(
+      context: context,
+      barrierDismissible: false,
+      useRootNavigator: true,
+      builder: (dialogContext) => PopScope(
+        canPop: false,
+        child: AlertDialog(
+          backgroundColor: AppColors.surface,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(24),
+          ),
+          contentPadding: const EdgeInsets.fromLTRB(24, 32, 24, 24),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Container(
+                width: 84,
+                height: 84,
+                decoration: BoxDecoration(
+                  color: AppColors.success.withValues(alpha: 0.12),
+                  shape: BoxShape.circle,
+                ),
+                child: const Icon(
+                  PhosphorIconsFill.checkCircle,
+                  size: 52,
+                  color: AppColors.success,
+                ),
+              ),
+              const SizedBox(height: 20),
+              Text(
+                '¡Entrega confirmada!',
+                textAlign: TextAlign.center,
+                style: dialogContext.textTheme.headlineSmall
+                    ?.copyWith(fontWeight: FontWeight.bold),
+              ),
+              const SizedBox(height: 8),
+              Text(
+                'Pedido #${order.orderCode} entregado con éxito.',
+                textAlign: TextAlign.center,
+                style: dialogContext.textTheme.bodyMedium,
+              ),
+              const SizedBox(height: 20),
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.symmetric(vertical: 16),
+                decoration: BoxDecoration(
+                  color: AppColors.success.withValues(alpha: 0.08),
+                  borderRadius: BorderRadius.circular(16),
+                ),
+                child: Column(
+                  children: [
+                    Text(
+                      'Ganaste',
+                      style: dialogContext.textTheme.bodySmall,
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      order.driverEarning.toCurrency,
+                      style: dialogContext.textTheme.headlineMedium?.copyWith(
+                        fontWeight: FontWeight.bold,
+                        color: AppColors.success,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 24),
+              AppButton(
+                label: 'Ir al menú',
+                onPressed: () {
+                  Navigator.of(dialogContext).pop();
+                  context.go(AppRoutes.home);
+                },
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
   }
 
   /// Captura foto de evidencia (opcional) y cobro en efectivo (si aplica).

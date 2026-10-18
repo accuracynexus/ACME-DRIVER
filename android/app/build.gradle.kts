@@ -5,6 +5,19 @@ plugins {
     id("dev.flutter.flutter-gradle-plugin")
 }
 
+// La clave de Google Maps se lee del .env del proyecto y se inyecta en el
+// AndroidManifest al compilar. Asi no queda escrita en ningun archivo que se
+// suba al repositorio (.env esta en .gitignore).
+import java.util.Properties
+
+var mapsApiKey = "tu_google_maps_api_key_aqui"
+val envFile = rootProject.file("../.env")
+if (envFile.exists()) {
+    val envProps = Properties()
+    envFile.inputStream().use { envProps.load(it) }
+    mapsApiKey = envProps.getProperty("GOOGLE_MAPS_API_KEY") ?: mapsApiKey
+}
+
 android {
     namespace = "com.acme.acme_driver"
     compileSdk = flutter.compileSdkVersion
@@ -27,6 +40,7 @@ android {
         versionCode = flutter.versionCode
         versionName = flutter.versionName
         multiDexEnabled = true
+        manifestPlaceholders["mapsApiKey"] = mapsApiKey
     }
 
     buildTypes {

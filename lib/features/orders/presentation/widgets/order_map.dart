@@ -1,6 +1,7 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
-import 'package:flutter_map/flutter_map.dart';
-import 'package:latlong2/latlong.dart';
+import 'package:google_maps_flutter/google_maps_flutter.dart';
 import 'package:phosphor_flutter/phosphor_flutter.dart';
 import '../../../../core/constants/app_colors.dart';
 import '../../../../core/services/route_service.dart';
@@ -9,9 +10,12 @@ import '../../../../core/utils/navigation_launcher.dart';
 /// Color de marca de Waze (cyan) para el botón de navegación.
 const Color _wazeColor = Color(0xFF33CCFF);
 
-/// Mapa interactivo (OpenStreetMap, sin API key) que muestra el local de
-/// recojo, el destino del cliente y, si está disponible, la posición del
-/// repartidor, con la ruta por calles (OSRM) entre ellos y su distancia/ETA.
+/// Mapa interactivo (Google Maps) que muestra el local de recojo, el destino
+/// del cliente y, si está disponible, la posición del repartidor, con la ruta
+/// por calles (OSRM) entre ellos y su distancia/ETA.
+///
+/// El trazado de la ruta lo sigue calculando OSRM, no Google: es gratuito y
+/// ya está integrado. Google aquí solo dibuja el mapa.
 class OrderMap extends StatefulWidget {
   final double? branchLat;
   final double? branchLng;
@@ -48,6 +52,12 @@ class OrderMap extends StatefulWidget {
 class _OrderMapState extends State<OrderMap> {
   final RouteService _routeService = RouteService();
   RouteResult? _route;
+
+  final Completer<GoogleMapController> _mapController = Completer();
+
+  /// Encuadre ya aplicado, para no reencuadrar en cada rebuild y pelearse con
+  /// el repartidor mientras mueve el mapa con el dedo.
+  bool _encuadrado = false;
 
   LatLng? get _branch => (widget.branchLat != null && widget.branchLng != null)
       ? LatLng(widget.branchLat!, widget.branchLng!)
@@ -111,62 +121,45 @@ class _OrderMapState extends State<OrderMap> {
         height: widget.height,
         child: Stack(
           children: [
-            FlutterMap(
-              options: MapOptions(
-                initialCenter: points.first,
-                initialZoom: 14,
-                initialCameraFit: points.length > 1
-                    ? CameraFit.coordinates(
-                        coordinates: points,
-                        padding: const EdgeInsets.all(48),
-                        maxZoom: 16,
-                      )
-                    : null,
-                interactionOptions: const InteractionOptions(
-                  flags: InteractiveFlag.all & ~InteractiveFlag.rotate,
-                ),
+            GoogleMap(
+              initialCameraPosition: CameraPosition(
+                target: points.first,
+                zoom: 14,
               ),
-              children: [
-                TileLayer(
-                  // Tiles estándar de OpenStreetMap: libres y sin API key.
-                  // CartoDB dejó de servir gratis y devuelve un tile con la
-                  // marca "API KEY REQUIRED" en vez del mapa.
-                  // Sin subdominios (OSM los descontinuó) y sin {r}: OSM no
-                  // publica tiles retina @2x.
-                  urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
-                  userAgentPackageName: 'com.acme.acme_driver',
-                  maxZoom: 19,
-                ),
+              onMapCreated: (c) {
+                if (!_mapController.isCompleted) _mapController.complete(c);
+                _encuadrar(points);
+              },
+              polylines: {
                 if (routePoints.length > 1)
-                  PolylineLayer(
-                    polylines: [
-                      Polyline(
-                        points: routePoints,
-                        strokeWidth: 4,
-                        color: AppColors.primary.withValues(alpha: 0.75),
-                      ),
-                    ],
+                  Polyline(
+                    polylineId: const PolylineId('ruta'),
+                    points: routePoints,
+                    width: 5,
+                    color: AppColors.primary.withValues(alpha: 0.75),
                   ),
-                MarkerLayer(
-                  markers: [
-                    if (_branch != null)
-                      _pin(_branch!, PhosphorIconsFill.storefront,
-                          AppColors.primary),
-                    if (_client != null)
-                      _pin(_client!, PhosphorIconsFill.mapPin, AppColors.accent),
-                    if (_driver != null)
-                      _pin(_driver!, PhosphorIconsFill.motorcycle,
-                          AppColors.info),
-                  ],
-                ),
-                const RichAttributionWidget(
-                  alignment: AttributionAlignment.bottomLeft,
-                  showFlutterMapAttribution: false,
-                  attributions: [
-                    TextSourceAttribution('© OpenStreetMap contributors'),
-                  ],
-                ),
-              ],
+              },
+              markers: {
+                if (_branch != null)
+                  _pin('local', _branch!, BitmapDescriptor.hueViolet,
+                      'Local de recojo'),
+                if (_client != null)
+                  _pin('cliente', _client!, BitmapDescriptor.hueOrange,
+                      'Entrega al cliente'),
+                if (_driver != null)
+                  _pin('repartidor', _driver!, BitmapDescriptor.hueAzure,
+                      'Tú'),
+              },
+              // Rotar e inclinar solo estorban en un mapa de 220 de alto que
+              // se mira de reojo mientras se maneja.
+              rotateGesturesEnabled: false,
+              tiltGesturesEnabled: false,
+              zoomControlsEnabled: false,
+              // La barra de Google abre su app al tocar un marcador y saca al
+              // repartidor de la pantalla del pedido. Los botones de navegar
+              // ya están abajo a la derecha.
+              mapToolbarEnabled: false,
+              myLocationButtonEnabled: false,
             ),
             if (_route != null)
               Positioned(
@@ -236,23 +229,42 @@ class _OrderMapState extends State<OrderMap> {
     );
   }
 
-  Marker _pin(LatLng point, IconData icon, Color color) {
+  /// Marcador de Google Maps.
+  ///
+  /// Van por color y no con los iconos de antes porque Google solo acepta
+  /// imágenes (`BitmapDescriptor`), no widgets. El `infoWindow` compensa:
+  /// al tocarlo dice qué punto es.
+  Marker _pin(String id, LatLng punto, double tono, String titulo) {
     return Marker(
-      point: point,
-      width: 40,
-      height: 40,
-      alignment: Alignment.topCenter,
-      child: Container(
-        decoration: BoxDecoration(
-          color: color,
-          shape: BoxShape.circle,
-          border: Border.all(color: Colors.white, width: 2.5),
-          boxShadow: const [
-            BoxShadow(
-                color: Color(0x40000000), blurRadius: 6, offset: Offset(0, 2)),
-          ],
+      markerId: MarkerId(id),
+      position: punto,
+      icon: BitmapDescriptor.defaultMarkerWithHue(tono),
+      infoWindow: InfoWindow(title: titulo),
+    );
+  }
+
+  /// Encuadra todos los puntos del pedido la primera vez que se dibuja.
+  Future<void> _encuadrar(List<LatLng> puntos) async {
+    if (_encuadrado || puntos.length < 2) return;
+    _encuadrado = true;
+
+    var surLat = puntos.first.latitude, norteLat = puntos.first.latitude;
+    var oesteLng = puntos.first.longitude, esteLng = puntos.first.longitude;
+    for (final p in puntos) {
+      if (p.latitude < surLat) surLat = p.latitude;
+      if (p.latitude > norteLat) norteLat = p.latitude;
+      if (p.longitude < oesteLng) oesteLng = p.longitude;
+      if (p.longitude > esteLng) esteLng = p.longitude;
+    }
+
+    final controlador = await _mapController.future;
+    await controlador.animateCamera(
+      CameraUpdate.newLatLngBounds(
+        LatLngBounds(
+          southwest: LatLng(surLat, oesteLng),
+          northeast: LatLng(norteLat, esteLng),
         ),
-        child: Icon(icon, color: Colors.white, size: 20),
+        48,
       ),
     );
   }
